@@ -163,11 +163,11 @@ async def h_dictate_toggle(st: State, params: dict) -> dict:
     from porcaria.pipeline.dictate import toggle
 
     clean = bool(params.get("clean", False))
-    note = bool(params.get("note", False))
-    route = params.get("route") or "auto"
+    route = params.get("route") or "default"
+    sinks = params.get("sinks")  # None | str | list[str] — pipeline parses
     profile = params.get("profile")
     return await asyncio.to_thread(
-        toggle, st.cfg, clean=clean, note=note, route=route, profile_name=profile
+        toggle, st.cfg, clean=clean, route=route, sinks=sinks, profile_name=profile
     )
 
 

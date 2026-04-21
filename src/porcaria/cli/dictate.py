@@ -1,4 +1,4 @@
-"""`porcaria dictate` — toggle recording, transcribe, optionally LLM-process, route to a sink."""
+"""`porcaria dictate` — toggle recording, transcribe, optionally LLM-process, route to sinks."""
 from __future__ import annotations
 
 from typing import Annotated
@@ -14,20 +14,9 @@ def main(
         typer.Option(
             "--clean",
             help=(
-                "Pass the raw transcript through the active LLM for punctuation, "
-                "capitalization, and lightweight rewording before it hits the sink. "
+                "Pass the transcript through the active LLM for punctuation, "
+                "capitalization, and lightweight rewording before it hits the sinks. "
                 "Off by default (raw ASR output is usually what you want)."
-            ),
-        ),
-    ] = False,
-    note: Annotated[
-        bool,
-        typer.Option(
-            "--note",
-            help=(
-                "In addition to the clipboard, append the transcript to a timestamped "
-                "file under the configured quick-notes directory. Useful for keeping a "
-                "session log without interrupting the paste-into-editor flow."
             ),
         ),
     ] = False,
@@ -36,40 +25,52 @@ def main(
         typer.Option(
             "--route",
             help=(
-                "Which sink(s) receive the transcript. "
-                "'auto' copies to the clipboard (and adds a quick-note if --note is set). "
-                "'clipboard' forces clipboard-only (ignores --note). "
-                "'note' writes a quick-note only (no clipboard). "
-                "'task' routes the utterance through the voice-command LLM into the "
-                "fazerei task CLI instead of copying it — use this to say things like "
-                "'add pay the rent to personal' or 'show me today's tasks'."
+                "Processing pipeline for the transcript. "
+                "'default' (the default) means no extra processing — the transcript "
+                "is handed straight off to the sinks. "
+                "'task' means the LLM interprets the utterance as a fazerei command "
+                "and executes it (use this for voice-driven task management). "
+                "Routes and sinks are orthogonal: you can combine --route task with "
+                "any --sinks value to also get a clipboard/note/speaker copy."
             ),
         ),
-    ] = "auto",
+    ] = "default",
+    sinks: Annotated[
+        str,
+        typer.Option(
+            "--sinks",
+            help=(
+                "Comma-separated list of write destinations for the transcript. "
+                "Values: 'clipboard' (copy to system clipboard), 'note' (append to "
+                "a timestamped file under the quick-notes directory), 'speaker' "
+                "(synthesize and play back via the active TTS provider). "
+                "Combine with commas — e.g. 'clipboard,note' or 'clipboard,speaker'. "
+                "Default is 'clipboard'."
+            ),
+        ),
+    ] = "clipboard",
     profile: Annotated[
         str | None,
         typer.Option(
             "--profile",
             help=(
-                "Use a named profile (e.g. 'home', 'travel') for this invocation only "
-                "instead of the active profile in config. Profiles bundle an ASR/LLM/TTS "
-                "choice — use this to temporarily switch between local and cloud backends."
+                "Use a named profile (e.g. 'home', 'travel') for this invocation only. "
+                "Profiles bundle an ASR/LLM/TTS choice — useful for swapping local ↔ cloud."
             ),
         ),
     ] = None,
 ) -> None:
-    """Toggle recording and route the transcript to a sink.
+    """Toggle recording. Flags on the stop press decide what happens.
 
-    First invocation starts recording from the configured PulseAudio source.
-    Second invocation stops recording, transcribes via the active ASR provider,
-    optionally runs the text through the LLM (--clean), and sends the result to
-    the selected sink (--route).
+    First press: begins recording. Any flags you pass are ignored — the start
+    press just starts capture.
 
-    You can pass flags on either press — whatever you set at start is persisted
-    and reused at stop, so pressing the same Hyprland keybind twice works
-    naturally. If you pass a flag at stop, it overrides the saved value for
-    that flag only."""
-    params = {"clean": clean, "note": note, "route": route, "profile": profile}
+    Second press: stops recording, transcribes, and applies the flags from
+    *this* press to the result. So you can start with a bare keybind, speak
+    for as long as you want, and pick the destination/processing at the end
+    based on how the dictation actually went (clipboard, cleaned, saved to a
+    note, read back aloud, routed through the task CLI)."""
+    params = {"clean": clean, "route": route, "sinks": sinks, "profile": profile}
     resp = try_rpc("dictate.toggle", params)
     if resp is not None:
         from porcaria.cli._common import print_rpc
@@ -78,11 +79,11 @@ def main(
             print_rpc(resp)
             return
 
-    # Daemon not running or not implementing this method yet — fall back.
+    # Daemon not running or method not implemented — fall back to legacy bash.
     args: list[str] = []
     if clean:
         args.append("--ai-clean")
-    if note:
+    if "note" in sinks.split(","):
         args.append("--quick-note")
     if route == "task":
         args.append("--fazerei")

@@ -1,7 +1,6 @@
 """Dictation orchestrator. Wraps capture + ASR + LLM + sink routing."""
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -19,6 +18,7 @@ from porcaria.sinks.base import DictationContext, SinkResult
 from porcaria.sinks.clipboard import ClipboardSink
 from porcaria.sinks.fazerei import FazereiSink
 from porcaria.sinks.quick_note import QuickNoteSink
+from porcaria.sinks.speaker import SpeakerSink
 
 log = logging.getLogger(__name__)
 _TIMING = os.environ.get("PORCARIA_TIMING") == "1"
@@ -32,6 +32,9 @@ def _stage(label: str, t0: float) -> float:
 
 _START_TIME_KEY = "start_ns"
 
+_VALID_ROUTES = {"default", "task"}
+_VALID_SINKS = {"clipboard", "note", "speaker"}
+
 
 def _record_start_file() -> Any:
     from porcaria import paths
@@ -39,43 +42,32 @@ def _record_start_file() -> Any:
     return paths.runtime_dir() / "dictation.start_ns"
 
 
-def _record_flags_file() -> Any:
-    from porcaria import paths
-
-    return paths.runtime_dir() / "dictation.flags.json"
-
-
-def _write_start_flags(flags: dict) -> None:
-    try:
-        _record_flags_file().write_text(json.dumps(flags))
-    except OSError as e:
-        log.warning("could not persist dictation start flags: %s", e)
-
-
-def _read_start_flags() -> dict:
-    p = _record_flags_file()
-    if not p.exists():
-        return {}
-    try:
-        data = json.loads(p.read_text())
-        p.unlink(missing_ok=True)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+def _parse_sinks(raw: str | list[str] | None) -> list[str]:
+    """Parse a comma-separated sinks string or list into a deduped list of
+    validated sink names. An empty input resolves to the default, ['clipboard']."""
+    if raw is None:
+        return ["clipboard"]
+    parts = raw if isinstance(raw, list) else [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        return ["clipboard"]
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        if p in seen:
+            continue
+        if p not in _VALID_SINKS:
+            raise ValueError(f"unknown sink {p!r}; valid: {sorted(_VALID_SINKS)}")
+        seen.add(p)
+        out.append(p)
+    return out
 
 
-def start_recording(
-    cfg: Config,
-    *,
-    clean: bool = False,
-    note: bool = False,
-    route: str = "auto",
-    profile_name: str | None = None,
-) -> dict:
+def start_recording(cfg: Config) -> dict:
     """Start ffmpeg recording. Returns daemon-facing summary.
 
-    Flags are persisted so a bare `porcaria dictate` (same keybind pressed
-    again, no flags) can pick them up at stop time."""
+    Intentionally takes no routing/cleanup flags — those are decided at stop
+    time. The start press just begins capture; you pick what to *do* with the
+    transcript when you stop."""
     if recorder.is_recording():
         return {"status": "already_recording"}
     pid = recorder.start(
@@ -85,9 +77,6 @@ def start_recording(
         max_duration_s=cfg.capture.timeout_seconds,
     )
     _record_start_file().write_text(str(time.time_ns()))
-    _write_start_flags(
-        {"clean": clean, "note": note, "route": route, "profile": profile_name}
-    )
     notify.send(
         "Dictation",
         "Recording… toggle the key again to stop.",
@@ -101,20 +90,30 @@ def stop_and_process(
     cfg: Config,
     *,
     clean: bool = False,
-    note: bool = False,
-    route: str = "auto",
+    route: str = "default",
+    sinks: str | list[str] | None = None,
     profile_name: str | None = None,
 ) -> dict:
-    """Stop recording and route the transcript through the selected sink(s).
+    """Stop recording, transcribe, and dispatch.
 
-    route:
-      - "auto"      → clipboard (with --note adding quick_note alongside)
-      - "clipboard" → clipboard only
-      - "note"      → quick_note only (skip clipboard)
-      - "task"      → fazerei voice-command flow (bypasses clipboard & note)
+    `route` is the processing pipeline:
+      - "default" → no extra processing; hand off to sinks.
+      - "task"    → LLM-interprets the transcript as a fazerei command and runs it.
+
+    `sinks` is the comma-separated list of write destinations:
+      - "clipboard" (the default), "note" (quick-note file), "speaker" (TTS read-back).
+      - Combine with commas, e.g. "clipboard,note" or "clipboard,speaker".
+
+    `route` and `sinks` are orthogonal: any route can coexist with any sinks. The
+    task route still does its own LLM interpretation on the raw transcript, but
+    sinks fire alongside.
     """
     if not recorder.is_recording():
         return {"status": "not_recording"}
+
+    sinks_resolved = _parse_sinks(sinks)
+    if route not in _VALID_ROUTES:
+        raise ValueError(f"unknown route {route!r}; valid: {sorted(_VALID_ROUTES)}")
 
     t_stop_start = time.monotonic()
     start_ns = _read_start_ns()
@@ -133,7 +132,8 @@ def stop_and_process(
 
     llm_output: str | None = None
     if clean and route != "task":
-        # Standard --clean flag: LLM cleanup for prose sinks.
+        # --clean: LLM cleanup for text that reaches sinks. Skipped for the task
+        # route because the task pipeline has its own interpretation LLM call.
         try:
             llm_output = clean_transcription(get_llm(cfg, prof.llm), transcript)
         except Exception as e:
@@ -143,28 +143,25 @@ def stop_and_process(
     ctx = DictationContext(now=datetime.now(), profile=prof.asr + "/" + prof.llm, extras={})
     sink_results: list[dict] = []
 
+    # Route processing. Task runs on the raw transcript (its LLM handles phrasing).
     if route == "task":
         res = _handle_fazerei(cfg, transcript, prof_llm=prof.llm, tts_name=prof.tts, ctx=ctx)
-        sink_results.append({"sink": "fazerei", **res.__dict__})
-        return _finish(
-            start_ns,
-            t_stop_start,
-            transcript,
-            sink_results,
-            t_stop=t_after_stop - t_stop_start,
-            t_asr=t_after_asr - t_before_asr,
-            wav_bytes=len(wav),
-        )
+        sink_results.append({"route": "task", **res.__dict__})
 
+    # Sink fanout, orthogonal to route. Sinks receive the cleaned text when --clean is set.
     text_for_sinks = llm_output if llm_output is not None else transcript
-
+    cleaned_arg = text_for_sinks if clean else None
     t_sinks_start = time.monotonic()
-    if route in ("auto", "clipboard") and route != "note":
-        r = ClipboardSink(cfg.sinks.clipboard).handle(transcript, text_for_sinks if clean else None)
-        sink_results.append({"sink": "clipboard", **r.__dict__})
-    if note or route == "note":
-        r = QuickNoteSink(cfg.sinks.quick_note).handle(transcript, text_for_sinks if clean else None)
-        sink_results.append({"sink": "quick_note", **r.__dict__})
+    for name in sinks_resolved:
+        if name == "clipboard":
+            r = ClipboardSink(cfg.sinks.clipboard).handle(transcript, cleaned_arg)
+        elif name == "note":
+            r = QuickNoteSink(cfg.sinks.quick_note).handle(transcript, cleaned_arg)
+        elif name == "speaker":
+            r = SpeakerSink(cfg, prof.tts).handle(transcript, cleaned_arg)
+        else:  # should be unreachable — _parse_sinks already validated
+            raise ValueError(f"unhandled sink {name!r}")
+        sink_results.append({"sink": name, **r.__dict__})
     _stage("sinks", t_sinks_start)
 
     return _finish(
@@ -291,28 +288,24 @@ def toggle(
     cfg: Config,
     *,
     clean: bool = False,
-    note: bool = False,
-    route: str = "auto",
+    route: str = "default",
+    sinks: str | list[str] | None = None,
     profile_name: str | None = None,
 ) -> dict:
-    """Start recording if stopped; stop+process if recording.
+    """Start recording if stopped; stop + process if recording.
 
-    On stop, flags saved at start are applied unless the current call
-    explicitly overrides them. The override rule is "explicit != default":
-    a bare `porcaria dictate` reuses the start-time flags; `porcaria dictate
-    --route note` overrides just `route` while keeping any other saved flags.
-    """
+    Flags on the start press are ignored for behavior — start just begins
+    capture. Flags on the stop press determine clean / route / sinks, so the
+    user decides at stop time how to handle the transcript.
+
+    Validation is eager, however: a bogus --sinks or --route raises even on a
+    start press, so the user sees their typo before recording for 10 minutes."""
+    if route not in _VALID_ROUTES:
+        raise ValueError(f"unknown route {route!r}; valid: {sorted(_VALID_ROUTES)}")
+    _parse_sinks(sinks)  # raises on invalid sink names
+
     if recorder.is_recording():
-        saved = _read_start_flags()
-        effective_clean = clean or bool(saved.get("clean"))
-        effective_note = note or bool(saved.get("note"))
-        effective_route = route if route != "auto" else saved.get("route", "auto")
-        effective_profile = profile_name if profile_name is not None else saved.get("profile")
         return stop_and_process(
-            cfg,
-            clean=effective_clean,
-            note=effective_note,
-            route=effective_route,
-            profile_name=effective_profile,
+            cfg, clean=clean, route=route, sinks=sinks, profile_name=profile_name
         )
-    return start_recording(cfg, clean=clean, note=note, route=route, profile_name=profile_name)
+    return start_recording(cfg)

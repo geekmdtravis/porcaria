@@ -33,7 +33,9 @@ After any `porcaria config edit`, run `porcaria daemon reload` so the daemon pic
 |------------------------------------------------|--------------------------------------------------------------------|
 | `porcaria dictate`                             | Toggle recording → transcribe → clipboard                          |
 | `porcaria dictate --clean`                     | Toggle recording → transcribe → LLM-polish → clipboard             |
-| `porcaria dictate --note`                      | Toggle recording → transcribe → clipboard **and** quick-note file  |
+| `porcaria dictate --sinks note`                | Toggle recording → transcribe → quick-note file (no clipboard)     |
+| `porcaria dictate --sinks clipboard,note`      | Send the transcript to both clipboard and a quick-note file        |
+| `porcaria dictate --sinks speaker`             | Read the transcript back aloud through the speakers                |
 | `porcaria dictate --route task`                | Toggle recording → voice-command the task CLI (fazerei)            |
 | `porcaria transcribe clip.wav`                 | Transcribe an existing WAV through the active ASR                  |
 | `porcaria speak "hello world"`                 | Synthesize + play speech through the speakers                      |
@@ -51,13 +53,13 @@ After any `porcaria config edit`, run `porcaria daemon reload` so the daemon pic
 
 The old `toggle_dictation.sh` / `toggle_ai_servers.sh` flows map one-to-one onto `porcaria` subcommands:
 
-| Keybind           | Legacy bash                                   | Porcaria                             |
-|-------------------|-----------------------------------------------|--------------------------------------|
-| Super+Alt+D       | `toggle_dictation.sh`                         | `porcaria dictate`                   |
-| Super+Alt+Shift+D | `toggle_dictation.sh --ai-clean`              | `porcaria dictate --clean`           |
-| Super+Alt+V       | `toggle_dictation.sh --fazerei`               | `porcaria dictate --route task`      |
-| Super+Alt+N       | `toggle_dictation.sh --quick-note`            | `porcaria dictate --note`            |
-| Super+Alt+Shift+N | `toggle_dictation.sh --quick-note --ai-clean` | `porcaria dictate --clean --note`    |
+| Keybind           | Legacy bash                                   | Porcaria                                    |
+|-------------------|-----------------------------------------------|---------------------------------------------|
+| Super+Alt+D       | `toggle_dictation.sh`                         | `porcaria dictate`                          |
+| Super+Alt+Shift+D | `toggle_dictation.sh --ai-clean`              | `porcaria dictate --clean`                  |
+| Super+Alt+V       | `toggle_dictation.sh --fazerei`               | `porcaria dictate --route task`             |
+| Super+Alt+N       | `toggle_dictation.sh --quick-note`            | `porcaria dictate --sinks note`             |
+| Super+Alt+Shift+N | `toggle_dictation.sh --quick-note --ai-clean` | `porcaria dictate --clean --sinks note`     |
 | Super+Alt+L       | `toggle_ai_servers.sh --small`                | `porcaria serve all --toggle --model small` |
 | Super+Alt+Shift+L | `toggle_ai_servers.sh --large`                | `porcaria serve all --toggle --model large` |
 
@@ -67,16 +69,28 @@ Paste into `~/.config/hypr/hyprland.conf`:
 bind = SUPER_ALT,       D, exec, porcaria dictate
 bind = SUPER_ALT_SHIFT, D, exec, porcaria dictate --clean
 bind = SUPER_ALT,       V, exec, porcaria dictate --route task
-bind = SUPER_ALT,       N, exec, porcaria dictate --note
-bind = SUPER_ALT_SHIFT, N, exec, porcaria dictate --clean --note
+bind = SUPER_ALT,       N, exec, porcaria dictate --sinks note
+bind = SUPER_ALT_SHIFT, N, exec, porcaria dictate --clean --sinks note
 bind = SUPER_ALT,       L, exec, porcaria serve all --toggle --model small
 bind = SUPER_ALT_SHIFT, L, exec, porcaria serve all --toggle --model large
 ```
 
 ### How the keybinds behave
 
-- **Dictation** (`D`, `Shift+D`, `V`, `N`, `Shift+N`): press to start recording, press the *same* keybind again to stop. Flags given at start (`--clean`, `--note`, `--route task`) are persisted and applied at stop automatically — you don't need to repeat them, but you can override them on the stop press (e.g. start with `--clean`, stop with `--route note` to save a cleaned note instead of copying).
-- **Servers** (`L`, `Shift+L`): `--toggle` means one key both launches and tears down the whole stack. Press once → kokoro/parakeet/llama.cpp come up (~7 s, with desktop notifications per service). Press again → they all stop. Swap between `--model small` and `--model large` by using `Shift+L` — if the other size is already running, only the llama.cpp process is swapped (kokoro + parakeet stay warm).
+**Decide what to do with the transcript at stop time, not start time.** The start press just begins recording — any flags on it are ignored. The stop press is where `--clean`, `--route`, and `--sinks` take effect. So you can start a dictation with a bare keybind, talk for as long as you want, and then pick the keybind that matches what you actually want to do with the result: raw clipboard, cleaned clipboard, saved note, read-back through the speakers, or voice-command the task CLI. The only thing the start press commits you to is *that you are recording*.
+
+Worked example: press Super+Alt+D to start a rambling 3-minute monologue, realize halfway through it's getting messy, then press Super+Alt+Shift+D (`--clean`) to stop — the LLM cleans up the full transcript and it lands on your clipboard. Or press Super+Alt+Shift+N (`--clean --sinks note`) instead to save the cleaned version to a timestamped file.
+
+**Servers** (`L`, `Shift+L`): `--toggle` means one key both launches and tears down the whole stack. Press once → kokoro/parakeet/llama.cpp come up (~7 s, with desktop notifications per service). Press again → they all stop. Swap between `--model small` and `--model large` by using `Shift+L` — if the other size is already running, only the llama.cpp process is swapped (kokoro + parakeet stay warm).
+
+### Routes vs sinks
+
+Two orthogonal dials control what `dictate` does with the transcript:
+
+- **`--route NAME`** picks the *processing pipeline* the transcript runs through. `default` (no extra processing) just hands off to sinks. `task` has the LLM interpret the utterance as a fazerei command and execute it. Future routes could translate, summarize, etc.
+- **`--sinks LIST`** picks the *passive write destinations* for the transcript. `clipboard` copies to the system clipboard, `note` appends to a quick-note file, `speaker` synthesizes + plays the text back. Combine them with commas: `--sinks clipboard,note`.
+
+They're orthogonal — `--route task --sinks note` runs the command AND saves the raw utterance to a note for audit. Defaults: `--route default --sinks clipboard`.
 
 ## Pipe examples
 
