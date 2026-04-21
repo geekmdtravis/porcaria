@@ -23,10 +23,6 @@ url = "http://127.0.0.1:5092"
 device = "cuda"
 model = "nvidia/parakeet-tdt-0.6b-v3"
 
-[asr.whisper_cpp]
-binary = "whisper-cli"
-model_path = "~/Applications/whisper.cpp/models/ggml-base.en.bin"
-
 [asr.openai_whisper]
 api_key_env = "OPENAI_API_KEY"
 model = "whisper-1"

@@ -29,11 +29,6 @@ class ParakeetCfg(_Strict):
     model: str = "nvidia/parakeet-tdt-0.6b-v3"
 
 
-class WhisperCppCfg(_Strict):
-    binary: str = "whisper-cli"
-    model_path: str
-
-
 class OpenAIWhisperCfg(_Strict):
     api_key_env: str = "OPENAI_API_KEY"
     model: str = "whisper-1"
@@ -42,7 +37,6 @@ class OpenAIWhisperCfg(_Strict):
 
 class ASRCfg(_Strict):
     parakeet: ParakeetCfg = ParakeetCfg()
-    whisper_cpp: WhisperCppCfg | None = None
     openai_whisper: OpenAIWhisperCfg = OpenAIWhisperCfg()
 
 

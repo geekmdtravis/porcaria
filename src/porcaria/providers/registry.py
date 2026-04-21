@@ -64,8 +64,7 @@ def _make_parakeet(cfg: Config) -> ASRProvider:
 
 ASR_FACTORIES: dict[str, Callable[[Config], ASRProvider]] = {
     "parakeet": _make_parakeet,
-    # Cloud/alternative backends land in Phase 4:
-    #   "whisper_cpp": _make_whisper_cpp,
+    # Cloud backend lands in Phase 4:
     #   "openai_whisper": _make_openai_whisper,
 }
 

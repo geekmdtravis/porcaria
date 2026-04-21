@@ -1,6 +1,6 @@
 # porcaria
 
-Portable voice-AI pipeline. Capture audio → transcribe → (optionally) process with an LLM → route to a sink (clipboard, quick-note, task CLI, …). Pluggable providers: local (Parakeet, Whisper.cpp, Kokoro, llama.cpp) or cloud (OpenAI Whisper, OpenAI TTS, ElevenLabs, OpenRouter). Exposed via a CLI and a long-lived daemon with Unix-socket + optional HTTP IPC.
+Portable voice-AI pipeline. Capture audio → transcribe → (optionally) process with an LLM → route to a sink (clipboard, quick-note, task CLI, …). Pluggable providers: local (Parakeet, Kokoro, llama.cpp) or cloud (OpenAI Whisper, OpenAI TTS, ElevenLabs, OpenRouter). Exposed via a CLI and a long-lived daemon with Unix-socket + optional HTTP IPC.
 
 ## Install
 
