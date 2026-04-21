@@ -16,6 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from porcaria import paths
+from porcaria.shellout import which
+
+
+class RecorderUnavailable(RuntimeError):
+    """A required external recording dependency (ffmpeg) is missing."""
 
 
 @dataclass
@@ -93,6 +98,12 @@ def start(
     """
     rp = rp or RecorderPaths.default()
     paths.ensure_dirs()
+
+    if not which("ffmpeg"):
+        raise RecorderUnavailable(
+            "ffmpeg not found on PATH — install it (e.g. `sudo pacman -S ffmpeg` "
+            "or `brew install ffmpeg`) to enable voice capture."
+        )
 
     if is_recording(rp):
         raise RuntimeError("recording already in progress")

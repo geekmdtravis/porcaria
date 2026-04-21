@@ -7,9 +7,12 @@ import time
 from datetime import datetime
 from typing import Any
 
+import httpx
+
 from porcaria import notify
 from porcaria.audio import player
 from porcaria.capture import recorder
+from porcaria.capture.recorder import RecorderUnavailable
 from porcaria.config.schema import Config
 from porcaria.pipeline.clean import clean as clean_transcription
 from porcaria.pipeline.summarize import summarize_for_speech
@@ -70,12 +73,19 @@ def start_recording(cfg: Config) -> dict:
     transcript when you stop."""
     if recorder.is_recording():
         return {"status": "already_recording"}
-    pid = recorder.start(
-        sample_rate=cfg.capture.sample_rate,
-        mono=cfg.capture.mono,
-        pulse_source=cfg.capture.pulse_source,
-        max_duration_s=cfg.capture.timeout_seconds,
-    )
+    try:
+        pid = recorder.start(
+            sample_rate=cfg.capture.sample_rate,
+            mono=cfg.capture.mono,
+            pulse_source=cfg.capture.pulse_source,
+            max_duration_s=cfg.capture.timeout_seconds,
+        )
+    except RecorderUnavailable as e:
+        notify.error("Dictation", str(e))
+        return {"status": "recorder_unavailable", "error": str(e)}
+    except Exception as e:
+        notify.error("Dictation", f"Could not start recording: {e}")
+        raise
     _record_start_file().write_text(str(time.time_ns()))
     notify.send(
         "Dictation",
@@ -124,7 +134,20 @@ def stop_and_process(
     prof = cfg.profile(profile_name)
     asr = get_asr(cfg, prof.asr)
     t_before_asr = time.monotonic()
-    transcript = asr.transcribe(wav)
+    try:
+        transcript = asr.transcribe(wav)
+    except httpx.ConnectError as e:
+        # Most common cause of "I recorded but nothing pasted": the ASR server isn't up.
+        msg = (
+            f"ASR server '{prof.asr}' unreachable — start it with "
+            "`porcaria serve all` (or `porcaria daemon` → toggle servers)."
+        )
+        notify.error("Dictation", msg)
+        log.warning("asr.transcribe connect failed: %s", e)
+        return {"status": "asr_unreachable", "error": str(e), "provider": prof.asr}
+    except Exception as e:
+        notify.error("Dictation", f"Transcription failed ({prof.asr}): {e}")
+        raise
     t_after_asr = _stage("asr.transcribe", t_before_asr)
     if not transcript.strip():
         notify.warn("Dictation", "No speech detected")
@@ -161,6 +184,8 @@ def stop_and_process(
             r = SpeakerSink(cfg, prof.tts).handle(transcript, cleaned_arg)
         else:  # should be unreachable — _parse_sinks already validated
             raise ValueError(f"unhandled sink {name!r}")
+        if not r.ok:
+            notify.error(f"Dictation → {name}", r.message)
         sink_results.append({"sink": name, **r.__dict__})
     _stage("sinks", t_sinks_start)
 
