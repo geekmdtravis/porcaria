@@ -53,8 +53,18 @@ class KokoroCfg(_Strict):
     url: str = "http://127.0.0.1:5093"
     voice: str = "af_heart"
     speed: float = 1.0
-    model_path: str = "~/Applications/kokoro-tts/kokoro-v1.0.onnx"
-    voices_path: str = "~/Applications/kokoro-tts/voices-v1.0.bin"
+    model_path: str = "~/.cache/porcaria/kokoro/kokoro-v1.0.onnx"
+    voices_path: str = "~/.cache/porcaria/kokoro/voices-v1.0.bin"
+    auto_download: bool = True
+    model_url: str = (
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+    )
+    voices_url: str = (
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+    )
+    # Empty string disables hash check (e.g. when pointing at a custom quantization).
+    model_sha256: str = "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
+    voices_sha256: str = "d19762d46cf0e6648cb28a7711df1637aad15818185d13f4ff840d57f2f6dfed"
 
 
 class OpenAITTSCfg(_Strict):

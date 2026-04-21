@@ -14,8 +14,8 @@ Endpoints:
 
 Run as:
     python -m porcaria.tts.kokoro_server --port 5093 \\
-           --model ~/Applications/kokoro-tts/kokoro-v1.0.onnx \\
-           --voices ~/Applications/kokoro-tts/voices-v1.0.bin
+           --model ~/.cache/porcaria/kokoro/kokoro-v1.0.onnx \\
+           --voices ~/.cache/porcaria/kokoro/voices-v1.0.bin
 """
 from __future__ import annotations
 
@@ -103,16 +103,16 @@ def main() -> int:
     ap.add_argument(
         "--model",
         default=None,
-        help="Path to kokoro-v1.0.onnx (default: ~/Applications/kokoro-tts/kokoro-v1.0.onnx).",
+        help="Path to kokoro-v1.0.onnx (default: ~/.cache/porcaria/kokoro/kokoro-v1.0.onnx).",
     )
     ap.add_argument(
         "--voices",
         default=None,
-        help="Path to voices-v1.0.bin (default: ~/Applications/kokoro-tts/voices-v1.0.bin).",
+        help="Path to voices-v1.0.bin (default: ~/.cache/porcaria/kokoro/voices-v1.0.bin).",
     )
     args = ap.parse_args()
 
-    default_dir = os.path.expanduser("~/Applications/kokoro-tts")
+    default_dir = os.path.expanduser("~/.cache/porcaria/kokoro")
     model_path = os.path.expanduser(args.model) if args.model else os.path.join(default_dir, "kokoro-v1.0.onnx")
     voices_path = os.path.expanduser(args.voices) if args.voices else os.path.join(default_dir, "voices-v1.0.bin")
     for p, label in ((model_path, "model"), (voices_path, "voices")):

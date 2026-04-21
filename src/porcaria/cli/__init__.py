@@ -3,7 +3,18 @@ from __future__ import annotations
 
 import typer
 
-from porcaria.cli import clean, config as config_cmd, daemon, dictate, serve, speak, status, task, transcribe
+from porcaria.cli import (
+    clean,
+    config as config_cmd,
+    daemon,
+    dictate,
+    download,
+    serve,
+    speak,
+    status,
+    task,
+    transcribe,
+)
 
 HELP_OPTS = {"help_option_names": ["-h", "--help"]}
 
@@ -45,6 +56,12 @@ app.add_typer(
     config_cmd.app,
     name="config",
     help="Inspect, edit, and validate the porcaria config.",
+    context_settings=HELP_OPTS,
+)
+app.add_typer(
+    download.app,
+    name="download",
+    help="Pre-fetch or re-download porcaria's model assets (currently: Kokoro TTS).",
     context_settings=HELP_OPTS,
 )
 

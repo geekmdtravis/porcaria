@@ -27,6 +27,7 @@ import httpx
 
 from porcaria import notify, paths
 from porcaria.config.schema import Config
+from porcaria.tts.kokoro_download import KokoroAssetError, ensure_kokoro_assets
 
 log = logging.getLogger(__name__)
 
@@ -312,10 +313,39 @@ def start_all(cfg: Config, model: str = "small") -> dict:
     """Start llama, parakeet, kokoro. If llama is already running with a
     different model, it is replaced; the others are left alone if healthy."""
     results: dict[str, dict] = {}
-    results["kokoro"] = _start_if_needed(_kokoro_spec(cfg))
+    results["kokoro"] = _start_kokoro(cfg)
     results["parakeet"] = _start_if_needed(_parakeet_spec(cfg))
     results["llama"] = _start_llama(cfg, model)
     return {"model": model, "servers": results}
+
+
+def _start_kokoro(cfg: Config) -> dict:
+    """Kokoro-specific start: check already-running first, then ensure ONNX
+    assets exist (download if missing), then spawn. Hash-checking a ~310 MB
+    file isn't free, so we only do it on the spawn path."""
+    k = cfg.tts.kokoro
+    health_url = f"{k.url}/health"
+    pid = _read_pid("kokoro")
+    if pid and _alive(pid):
+        try:
+            r = httpx.get(health_url, timeout=1.0)
+            if r.status_code == 200:
+                return {"status": "already_running", "pid": pid}
+        except httpx.HTTPError:
+            pass
+    try:
+        r = httpx.get(health_url, timeout=1.0)
+        if r.status_code == 200:
+            return {"status": "running_externally", "note": "found existing service on port; not spawning"}
+    except httpx.HTTPError:
+        pass
+    try:
+        ensure_kokoro_assets(k)
+    except KokoroAssetError as e:
+        log.warning("supervisor: kokoro assets unavailable: %s", e)
+        notify.warn("porcaria", f"kokoro failed: {e}")
+        return {"status": "error", "error": str(e)}
+    return _spawn(_kokoro_spec(cfg))
 
 
 def _start_if_needed(spec: ServerSpec) -> dict:
@@ -356,7 +386,7 @@ def start_one(cfg: Config, which: str, *, model: str = "small") -> dict:
         case "asr":
             return _start_if_needed(_parakeet_spec(cfg))
         case "tts":
-            return _start_if_needed(_kokoro_spec(cfg))
+            return _start_kokoro(cfg)
         case "llm":
             return _start_llama(cfg, model)
         case _:
