@@ -1,0 +1,118 @@
+# Default porcaria config. Override via $XDG_CONFIG_HOME/porcaria/config.toml or env vars.
+
+active_profile = "home"
+
+# ---------- profiles ----------
+
+[profiles.home]
+asr = "parakeet"
+tts = "kokoro"
+llm = "llamacpp"
+sinks = ["clipboard", "fazerei"]
+
+[profiles.travel]
+asr = "openai_whisper"
+tts = "openai_tts"
+llm = "openrouter"
+sinks = ["clipboard"]
+
+# ---------- ASR providers ----------
+
+[asr.parakeet]
+url = "http://127.0.0.1:5092"
+device = "cuda"
+model = "nvidia/parakeet-tdt-0.6b-v3"
+
+[asr.whisper_cpp]
+binary = "whisper-cli"
+model_path = "~/Applications/whisper.cpp/models/ggml-base.en.bin"
+
+[asr.openai_whisper]
+api_key_env = "OPENAI_API_KEY"
+model = "whisper-1"
+base_url = "https://api.openai.com/v1"
+
+# ---------- TTS providers ----------
+
+[tts.kokoro]
+url = "http://127.0.0.1:5093"
+voice = "af_heart"
+speed = 1.0
+model_path = "~/Applications/kokoro-tts/kokoro-v1.0.onnx"
+voices_path = "~/Applications/kokoro-tts/voices-v1.0.bin"
+
+[tts.openai_tts]
+api_key_env = "OPENAI_API_KEY"
+model = "tts-1"
+voice = "alloy"
+base_url = "https://api.openai.com/v1"
+
+[tts.elevenlabs]
+api_key_env = "ELEVENLABS_API_KEY"
+voice_id = ""
+model = "eleven_turbo_v2_5"
+
+[tts.none]
+# null provider (notify-send only)
+
+# ---------- LLM providers ----------
+
+[llm.llamacpp]
+url = "http://127.0.0.1:8089"
+model_small = "ggml-org/Qwen3-4B-Instruct-2507-Q8_0-GGUF"
+model_large = "ggml-org/gpt-oss-120b-GGUF"
+ctx_small = 8192
+ctx_large = 32768
+
+[llm.openrouter]
+api_key_env = "OPENROUTER_API_KEY"
+model = "anthropic/claude-sonnet-4-6"
+base_url = "https://openrouter.ai/api/v1"
+
+# ---------- capture ----------
+
+[capture]
+sample_rate = 16000
+mono = true
+timeout_seconds = 600
+pulse_source = "default"
+
+# ---------- sinks ----------
+
+[sinks.clipboard]
+tool = "auto"  # auto-detect wl-copy / xclip / pbcopy
+
+[sinks.quick_note]
+dir = "$XDG_DOCUMENTS_DIR/quick-notes"
+
+[sinks.fazerei]
+command = "fazerei"
+enabled = true
+
+# ---------- daemon ----------
+
+[daemon]
+ipc_socket = ""           # blank → uses XDG_RUNTIME_DIR/porcaria/ipc.sock
+http_enabled = false
+http_bind = "127.0.0.1:8790"
+
+# ---------- servers (port/model config for `porcaria serve`) ----------
+
+[servers.llamacpp]
+port = 8089
+flash_attn = true
+kv_cache_type = "q8_0"
+batch_size = 2048
+ubatch_size = 2048
+fit_target = 4096
+binary = "llama-server"
+
+[servers.parakeet]
+port = 5092
+device = "cuda"
+model = "nvidia/parakeet-tdt-0.6b-v3"
+python_executable = ""  # blank → sys.executable (the daemon's own venv)
+
+[servers.kokoro]
+port = 5093
+python_executable = ""  # blank → sys.executable
