@@ -11,9 +11,33 @@ from porcaria.cli._common import try_rpc
 
 
 def main(
-    in_: Annotated[Path | None, typer.Option("--in", help="Read text from file; '-' for stdin.")] = None,
-    style: Annotated[str, typer.Option("--style", help="'dictation' or 'summary'.")] = "dictation",
+    in_: Annotated[
+        Path | None,
+        typer.Option(
+            "--in",
+            help=(
+                "Path to the text file to clean. Pass '-' (or omit) to read from stdin, "
+                "which makes this easy to pipe: `cat raw.txt | porcaria clean`."
+            ),
+        ),
+    ] = None,
+    style: Annotated[
+        str,
+        typer.Option(
+            "--style",
+            help=(
+                "Cleanup style. 'dictation' adds punctuation/capitalization while "
+                "preserving wording for paste-into-editor workflows. 'summary' "
+                "condenses the text into a speech-friendly summary (used internally "
+                "to summarize query results before TTS)."
+            ),
+        ),
+    ] = "dictation",
 ) -> None:
+    """Pass text through the active LLM to clean it up.
+
+    Reads text from stdin (default) or a file via --in, and prints the cleaned
+    output to stdout. Requires the daemon to be running."""
     if in_ is None or str(in_) == "-":
         text = sys.stdin.read()
     else:

@@ -15,7 +15,15 @@ from porcaria import paths
 from porcaria.cli._common import try_rpc
 from porcaria.daemon import Client
 
-app = typer.Typer(help="Manage the porcaria daemon.", no_args_is_help=True)
+app = typer.Typer(
+    help=(
+        "Lifecycle commands for the long-lived porcaria daemon. "
+        "The daemon holds the UDS+HTTP IPC socket, keeps provider clients warm, "
+        "and supervises local model servers. Most other subcommands (`dictate`, "
+        "`transcribe`, `speak`, `clean`, `task`) require it to be running."
+    ),
+    no_args_is_help=True,
+)
 
 PID_FILE = "porcaria.pid"
 
@@ -46,9 +54,21 @@ def _alive(pid: int) -> bool:
 
 @app.command("start")
 def start(
-    foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in foreground."),
+    foreground: bool = typer.Option(
+        False,
+        "--foreground",
+        "-f",
+        help=(
+            "Run the daemon attached to the current terminal (logs go to stdout) "
+            "instead of double-forking into the background. Useful for debugging."
+        ),
+    ),
 ) -> None:
-    """Start the porcaria daemon."""
+    """Start the porcaria daemon, double-forked into the background by default.
+
+    Writes its PID to $XDG_RUNTIME_DIR/porcaria/porcaria.pid and exposes a Unix
+    socket at $XDG_RUNTIME_DIR/porcaria/porcaria.sock. Logs go to daemon.log
+    next to the pid file."""
     paths.ensure_dirs()
     existing = _read_pid()
     if existing and _alive(existing):
@@ -79,7 +99,10 @@ def start(
 
 @app.command("stop")
 def stop() -> None:
-    """Stop the porcaria daemon."""
+    """Stop the porcaria daemon, shutting down supervised model servers too.
+
+    Prefers a graceful shutdown RPC; falls back to SIGTERM on the pid file if
+    the socket is unresponsive."""
     resp = try_rpc("shutdown")
     if resp is not None and resp.ok:
         typer.echo("shutting down")
@@ -103,7 +126,10 @@ def stop() -> None:
 
 @app.command("status")
 def status() -> None:
-    """Report daemon liveness."""
+    """Report daemon liveness as JSON.
+
+    Shows the pid file path, whether the pid is alive, the socket path, and whether
+    a ping RPC succeeds. Useful for health-check scripts and troubleshooting."""
     client = Client()
     pid = _read_pid()
     payload: dict = {
@@ -119,7 +145,10 @@ def status() -> None:
 
 @app.command("reload")
 def reload_() -> None:
-    """Reload config without restarting."""
+    """Reload the config file and flush cached provider clients without restarting.
+
+    Call this after editing ~/.config/porcaria/config.toml (or `porcaria config edit`)
+    so the daemon picks up the new profile/provider settings."""
     resp = try_rpc("reload")
     if resp is None:
         typer.secho("daemon not running", fg=typer.colors.RED, err=True)

@@ -11,6 +11,11 @@ from porcaria.daemon import supervisor
 
 
 def main() -> None:
+    """Print a JSON snapshot of the current pipeline state.
+
+    Includes the active profile, each configured provider (ASR/LLM/TTS), and the
+    health of the local model servers (PID, listening port, reachability).
+    If the daemon isn't running, the health check runs locally instead."""
     resp = try_rpc("status")
     if resp is not None and resp.ok:
         typer.echo(json.dumps(resp.result, indent=2))

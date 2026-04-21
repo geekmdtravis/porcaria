@@ -12,11 +12,48 @@ from porcaria.cli._common import try_rpc
 
 
 def main(
-    text: Annotated[str, typer.Argument(help="Text to speak. Use '-' to read stdin.")],
-    voice: Annotated[str | None, typer.Option("--voice")] = None,
-    speed: Annotated[float, typer.Option("--speed")] = 1.0,
-    out: Annotated[Path | None, typer.Option("--out", help="Write WAV to path; omit to play.")] = None,
+    text: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Text to synthesize. Pass '-' to read the text from stdin "
+                "(useful for piping: `echo hello | porcaria speak -`)."
+            ),
+        ),
+    ],
+    voice: Annotated[
+        str | None,
+        typer.Option(
+            "--voice",
+            help=(
+                "Voice identifier to use, overriding the profile default. "
+                "Valid names depend on the active TTS provider (Kokoro ONNX voices "
+                "like 'af_bella', OpenAI voices like 'nova', ElevenLabs voice IDs)."
+            ),
+        ),
+    ] = None,
+    speed: Annotated[
+        float,
+        typer.Option(
+            "--speed",
+            help="Playback speed multiplier. 1.0 = natural pace; <1 slower, >1 faster.",
+        ),
+    ] = 1.0,
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            help=(
+                "Write the synthesized audio to this WAV file instead of playing it. "
+                "If omitted, the raw WAV bytes are streamed to the audio player "
+                "(wl-play/paplay/ffplay — whichever is available)."
+            ),
+        ),
+    ] = None,
 ) -> None:
+    """Synthesize speech from text via the active TTS provider and play or save it.
+
+    Requires the daemon to be running (`porcaria daemon start`)."""
     if text == "-":
         text = sys.stdin.read()
     params = {"text": text, "voice": voice, "speed": speed}

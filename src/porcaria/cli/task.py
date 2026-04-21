@@ -10,8 +10,22 @@ from porcaria.cli._common import print_rpc, try_rpc
 
 
 def main(
-    text: Annotated[str, typer.Argument(help="Command text. Use '-' to read stdin.")],
+    text: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Natural-language command to interpret, e.g. "
+                "'add buy milk to personal', 'mark task 42 done', 'show today'. "
+                "Pass '-' to read the command text from stdin."
+            ),
+        ),
+    ],
 ) -> None:
+    """Run a text-only voice-command through the task sink (fazerei by default).
+
+    The active LLM translates the free-form request into a concrete task-CLI
+    invocation and the result is executed. Equivalent to `porcaria dictate --route task`
+    but skips audio capture/ASR — useful for scripting or testing the command layer."""
     if text == "-":
         text = sys.stdin.read()
     resp = try_rpc("task", {"text": text})
