@@ -357,7 +357,7 @@ def _start_if_needed(spec: ServerSpec) -> dict:
                 return {"status": "already_running", "pid": pid}
         except httpx.HTTPError:
             pass
-    # No tracked PID but port may already be owned by a legacy-started server.
+    # No tracked PID, but the port may already be owned by an externally-started server.
     try:
         r = httpx.get(spec.health_url, timeout=1.0)
         if r.status_code == 200:

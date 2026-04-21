@@ -1,7 +1,9 @@
 """Load porcaria config: defaults → user TOML → env overlay."""
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -9,7 +11,27 @@ from typing import Any
 from porcaria import paths
 from porcaria.config.schema import Config
 
+log = logging.getLogger(__name__)
+
 DEFAULTS_FILE = Path(__file__).with_name("defaults.toml")
+
+
+def seed_user_config(path: Path) -> bool:
+    """Copy the shipped defaults.toml to `path` if it doesn't exist yet.
+
+    Returns True if a file was written, False if it already existed or the
+    copy failed. Permission/disk errors are swallowed — porcaria keeps running
+    on its packaged defaults in that case.
+    """
+    if path.exists():
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(DEFAULTS_FILE, path)
+        return True
+    except OSError as e:
+        log.warning("could not seed user config at %s: %s", path, e)
+        return False
 
 
 def _read_toml(p: Path) -> dict[str, Any]:
@@ -66,7 +88,14 @@ def _apply_env(data: dict[str, Any]) -> dict[str, Any]:
 
 def load_config(user_file: Path | None = None) -> Config:
     data = _read_toml(DEFAULTS_FILE)
-    uf = user_file if user_file is not None else paths.config_file()
+    if user_file is None:
+        uf = paths.config_file()
+        # First-run seeding: materialize the defaults at the XDG location so
+        # the user can edit them directly. Explicit paths (tests, tooling)
+        # skip this — callers that pass a path own its lifecycle.
+        seed_user_config(uf)
+    else:
+        uf = user_file
     if uf.exists():
         data = _deep_merge(data, _read_toml(uf))
     data = _apply_env(data)

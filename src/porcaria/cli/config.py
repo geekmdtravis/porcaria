@@ -10,7 +10,7 @@ import typer
 
 from porcaria import paths
 from porcaria.config import load_config
-from porcaria.config.loader import DEFAULTS_FILE
+from porcaria.config.loader import DEFAULTS_FILE, seed_user_config
 
 app = typer.Typer(
     help=(
@@ -48,8 +48,7 @@ def edit() -> None:
     `porcaria daemon reload` for the daemon to pick up the changes."""
     paths.ensure_dirs()
     cf = paths.config_file()
-    if not cf.exists():
-        shutil.copy(DEFAULTS_FILE, cf)
+    if seed_user_config(cf):
         typer.echo(f"seeded {cf} from defaults")
     editor = os.environ.get("EDITOR", "nvim" if shutil.which("nvim") else "vi")
     subprocess.call([editor, str(cf)])

@@ -46,13 +46,14 @@ def _record_start_file() -> Any:
 
 
 def _parse_sinks(raw: str | list[str] | None) -> list[str]:
-    """Parse a comma-separated sinks string or list into a deduped list of
-    validated sink names. An empty input resolves to the default, ['clipboard']."""
+    """Parse a comma-separated sinks string or list into a deduped, validated list.
+    Returns [] for None / empty input — callers decide what to do with an empty
+    resolution (substitute a profile default, warn the user, etc.)."""
     if raw is None:
-        return ["clipboard"]
+        return []
     parts = raw if isinstance(raw, list) else [p.strip() for p in raw.split(",") if p.strip()]
     if not parts:
-        return ["clipboard"]
+        return []
     seen: set[str] = set()
     out: list[str] = []
     for p in parts:
@@ -111,8 +112,10 @@ def stop_and_process(
       - "task"    → LLM-interprets the transcript as a fazerei command and runs it.
 
     `sinks` is the comma-separated list of write destinations:
-      - "clipboard" (the default), "note" (quick-note file), "speaker" (TTS read-back).
+      - "clipboard", "note" (quick-note file), "speaker" (TTS read-back).
       - Combine with commas, e.g. "clipboard,note" or "clipboard,speaker".
+      - None → fall back to the active profile's `sinks` list. An empty
+        resolution triggers a console + desktop warning.
 
     `route` and `sinks` are orthogonal: any route can coexist with any sinks. The
     task route still does its own LLM interpretation on the raw transcript, but
@@ -121,7 +124,17 @@ def stop_and_process(
     if not recorder.is_recording():
         return {"status": "not_recording"}
 
+    prof = cfg.profile(profile_name)
+    if sinks is None:
+        sinks = list(prof.sinks)
     sinks_resolved = _parse_sinks(sinks)
+    if not sinks_resolved:
+        msg = (
+            f"No sinks configured for profile {cfg.active_profile!r}; "
+            "transcript will not be delivered anywhere."
+        )
+        log.warning(msg)
+        notify.warn("Dictation", msg)
     if route not in _VALID_ROUTES:
         raise ValueError(f"unknown route {route!r}; valid: {sorted(_VALID_ROUTES)}")
 
@@ -130,8 +143,6 @@ def stop_and_process(
     wav = recorder.stop()
     t_after_stop = _stage("recorder.stop", t_stop_start)
     notify.info("Dictation", f"Transcribing ({len(wav)//1024} KB)…")
-
-    prof = cfg.profile(profile_name)
     asr = get_asr(cfg, prof.asr)
     t_before_asr = time.monotonic()
     try:

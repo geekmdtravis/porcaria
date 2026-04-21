@@ -1,119 +1,185 @@
-# Default porcaria config. Override via $XDG_CONFIG_HOME/porcaria/config.toml or env vars.
+# ============================================================================
+# porcaria — default configuration
+# ============================================================================
+# This file ships with the `porcaria` package. On first run porcaria copies it
+# to $XDG_CONFIG_HOME/porcaria/config.toml (typically
+# ~/.config/porcaria/config.toml) so you have an editable starting point.
+#
+# Precedence (later layers win):
+#   1. These packaged defaults
+#   2. Your user config at ~/.config/porcaria/config.toml
+#   3. Environment variables — PORCARIA_PROFILE, PORCARIA_ASR, PORCARIA_TTS,
+#      PORCARIA_LLM, PORCARIA_LLM_URL, PORCARIA_PARAKEET_URL,
+#      PORCARIA_KOKORO_URL, PORCARIA_IPC_SOCKET, PORCARIA_HTTP_ENABLED,
+#      PORCARIA_HTTP_BIND.
+#
+# Useful commands:
+#   porcaria config path       # print where this file lives
+#   porcaria config show       # print the fully-merged effective config
+#   porcaria config defaults   # print the shipped defaults (this file)
+#   porcaria config validate   # schema-check your edits
+#   porcaria daemon reload     # make a running daemon pick up edits
+# ============================================================================
 
+# Which profile is active. Override per-invocation via `--profile <name>` on
+# `porcaria dictate`, or globally via $PORCARIA_PROFILE.
 active_profile = "home"
 
+
 # ---------- profiles ----------
+# A profile bundles the three provider choices (ASR / TTS / LLM) plus the list
+# of sinks the transcript fans out to. Swap the whole stack by changing
+# `active_profile` above, or a single slot via $PORCARIA_ASR / _TTS / _LLM.
 
 [profiles.home]
-asr = "parakeet"
-tts = "kokoro"
-llm = "llamacpp"
-sinks = ["clipboard", "fazerei"]
+asr = "parakeet"                              # key must match an [asr.<name>] section below
+tts = "kokoro"                                # key must match a [tts.<name>] section below
+llm = "llamacpp"                              # key must match a [llm.<name>] section below
+# sinks: default fanout destinations for the transcript when `--sinks` is not
+# passed. Valid values: "clipboard", "note" (append to quick-notes file),
+# "speaker" (TTS read-back). An empty list triggers a warning — the transcript
+# is produced but goes nowhere.
+sinks = ["clipboard"]
 
 [profiles.travel]
+# Cloud-only profile — useful on a laptop where you don't want to run the
+# local model servers. API keys are read from the env vars named in each
+# provider section below.
 asr = "openai_whisper"
 tts = "openai_tts"
 llm = "openrouter"
 sinks = ["clipboard"]
 
+
 # ---------- ASR providers ----------
 
 [asr.parakeet]
-url = "http://127.0.0.1:5092"
-device = "cuda"
-model = "nvidia/parakeet-tdt-0.6b-v3"
+# Local NVIDIA Parakeet server managed by `porcaria serve asr`.
+url = "http://127.0.0.1:5092"                 # where the server listens
+device = "cuda"                               # "cuda" (GPU) or "cpu" (much slower)
+model = "nvidia/parakeet-tdt-0.6b-v3"         # HuggingFace model id
 
 [asr.openai_whisper]
-api_key_env = "OPENAI_API_KEY"
+# Cloud Whisper via the OpenAI-compatible transcription API. Works with any
+# base_url that implements the endpoint (e.g. self-hosted faster-whisper).
+api_key_env = "OPENAI_API_KEY"                # env var that holds the API key
 model = "whisper-1"
 base_url = "https://api.openai.com/v1"
+
 
 # ---------- TTS providers ----------
 
 [tts.kokoro]
+# Local Kokoro TTS server managed by `porcaria serve tts`. On first launch the
+# model files auto-download to model_path / voices_path (controlled below).
 url = "http://127.0.0.1:5093"
-voice = "af_heart"
-speed = 1.0
-model_path = "~/.cache/porcaria/kokoro/kokoro-v1.0.onnx"
+voice = "af_heart"                            # voice id — see voices-v1.0.bin
+speed = 1.0                                   # 1.0 normal; <1 slower, >1 faster
+model_path  = "~/.cache/porcaria/kokoro/kokoro-v1.0.onnx"
 voices_path = "~/.cache/porcaria/kokoro/voices-v1.0.bin"
-auto_download = true
-model_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+auto_download = true                          # fetch the files if missing
+model_url  = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
 voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
-model_sha256 = "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
+# SHA256 integrity pins. Set to "" to disable the check (e.g. if you swap in
+# a custom quantization of the model).
+model_sha256  = "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
 voices_sha256 = "d19762d46cf0e6648cb28a7711df1637aad15818185d13f4ff840d57f2f6dfed"
 
 [tts.openai_tts]
+# Cloud TTS via OpenAI.
 api_key_env = "OPENAI_API_KEY"
-model = "tts-1"
-voice = "alloy"
+model = "tts-1"                               # or "tts-1-hd" for better quality
+voice = "alloy"                               # alloy | echo | fable | onyx | nova | shimmer
 base_url = "https://api.openai.com/v1"
 
 [tts.elevenlabs]
 api_key_env = "ELEVENLABS_API_KEY"
-voice_id = ""
+voice_id = ""                                 # blank uses the account default
 model = "eleven_turbo_v2_5"
 
 [tts.none]
-# null provider (notify-send only)
+# Null provider — dictation still runs, but the "speaker" sink becomes a
+# no-op (notify-send only). Use this when you want silent transcription.
+
 
 # ---------- LLM providers ----------
 
 [llm.llamacpp]
+# Local llama.cpp server managed by `porcaria serve llm`. Two model sizes:
+# "small" is used for dictation cleanup (--clean); "large" for the task route
+# (voice commands). Pick one with `porcaria serve llm --model small|large`.
 url = "http://127.0.0.1:8089"
 model_small = "ggml-org/Qwen3-4B-Instruct-2507-Q8_0-GGUF"
 model_large = "ggml-org/gpt-oss-120b-GGUF"
-ctx_small = 8192
-ctx_large = 32768
+ctx_small = 8192                              # context window (tokens) — small
+ctx_large = 32768                             # context window (tokens) — large
 
 [llm.openrouter]
+# Any model routable via OpenRouter. Swap models without changing code.
 api_key_env = "OPENROUTER_API_KEY"
 model = "anthropic/claude-sonnet-4-6"
 base_url = "https://openrouter.ai/api/v1"
 
+
 # ---------- capture ----------
 
 [capture]
+# ffmpeg/PulseAudio capture settings. Most users should not need to change
+# these — the ASR models want 16 kHz mono and that's already set.
 sample_rate = 16000
 mono = true
-timeout_seconds = 600
-pulse_source = "default"
+timeout_seconds = 600                         # hard auto-stop after this many seconds
+pulse_source = "default"                      # `pactl list short sources` to pick
+
 
 # ---------- sinks ----------
 
 [sinks.clipboard]
-tool = "auto"  # auto-detect wl-copy / xclip / pbcopy
+# Clipboard tool: "auto" picks the first available (wl-copy on Wayland, xclip
+# on X11, pbcopy on macOS). Force a specific tool if auto-detection misbehaves.
+tool = "auto"
 
 [sinks.quick_note]
+# Where the "note" sink appends transcripts. $VAR expansion applies.
 dir = "$XDG_DOCUMENTS_DIR/quick-notes"
 
 [sinks.fazerei]
+# The `fazerei` external task-manager binary used by `--route task`. Not a
+# sink you fan out to — it's a separate *route*.
 command = "fazerei"
 enabled = true
+
 
 # ---------- daemon ----------
 
 [daemon]
-ipc_socket = ""           # blank → uses XDG_RUNTIME_DIR/porcaria/ipc.sock
+# IPC transport for `porcaria daemon`. Leave ipc_socket blank to use the XDG
+# default ($XDG_RUNTIME_DIR/porcaria/ipc.sock). Enable http_enabled only if
+# you need RPC from another host/container.
+ipc_socket = ""
 http_enabled = false
 http_bind = "127.0.0.1:8790"
+
 
 # ---------- servers (port/model config for `porcaria serve`) ----------
 
 [servers.llamacpp]
+# llama-server process tuning. flash_attn + q8_0 kv cache drastically cuts
+# VRAM at a small quality cost. Lower the batch sizes on a smaller GPU.
 port = 8089
 flash_attn = true
 kv_cache_type = "q8_0"
 batch_size = 2048
 ubatch_size = 2048
 fit_target = 4096
-binary = "llama-server"
+binary = "llama-server"                       # must be on $PATH
 
 [servers.parakeet]
 port = 5092
-device = "cuda"
+device = "cuda"                               # "cuda" (GPU) or "cpu" (slower)
 model = "nvidia/parakeet-tdt-0.6b-v3"
-python_executable = ""  # blank → sys.executable (the daemon's own venv)
+python_executable = ""                        # blank → daemon's own interpreter
 
 [servers.kokoro]
 port = 5093
-python_executable = ""  # blank → sys.executable
+python_executable = ""                        # blank → daemon's own interpreter

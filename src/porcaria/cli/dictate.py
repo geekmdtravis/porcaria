@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from porcaria.cli._common import legacy_dictate, try_rpc
+from porcaria.cli._common import print_rpc, try_rpc
 
 
 def main(
@@ -36,7 +36,7 @@ def main(
         ),
     ] = "default",
     sinks: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--sinks",
             help=(
@@ -45,10 +45,10 @@ def main(
                 "a timestamped file under the quick-notes directory), 'speaker' "
                 "(synthesize and play back via the active TTS provider). "
                 "Combine with commas — e.g. 'clipboard,note' or 'clipboard,speaker'. "
-                "Default is 'clipboard'."
+                "If omitted, the active profile's `sinks` list is used."
             ),
         ),
-    ] = "clipboard",
+    ] = None,
     profile: Annotated[
         str | None,
         typer.Option(
@@ -72,20 +72,18 @@ def main(
     note, read back aloud, routed through the task CLI)."""
     params = {"clean": clean, "route": route, "sinks": sinks, "profile": profile}
     resp = try_rpc("dictate.toggle", params)
-    if resp is not None:
-        from porcaria.cli._common import print_rpc
-
-        if resp.ok or (resp.error and resp.error.get("code") != "not_implemented"):
-            print_rpc(resp)
-            return
-
-    # Daemon not running or method not implemented — fall back to legacy bash.
-    args: list[str] = []
-    if clean:
-        args.append("--ai-clean")
-    if "note" in sinks.split(","):
-        args.append("--quick-note")
-    if route == "task":
-        args.append("--fazerei")
-    rc = legacy_dictate(args)
-    raise typer.Exit(rc)
+    if resp is None:
+        typer.secho(
+            "daemon not running; run `porcaria daemon start` first",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        raise typer.Exit(2)
+    if resp.error and resp.error.get("code") == "not_implemented":
+        typer.secho(
+            "dictate.toggle is not implemented by the running daemon",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
+    print_rpc(resp)

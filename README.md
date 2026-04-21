@@ -49,19 +49,19 @@ After any `porcaria config edit`, run `porcaria daemon reload` so the daemon pic
 | `porcaria daemon {start,stop,status,reload}`   | Daemon lifecycle                                                   |
 | `porcaria config {show,path,edit,validate,defaults}` | Config inspection + editing                                  |
 
-## Hyprland keybind parity
+## Hyprland keybinds
 
-The old `toggle_dictation.sh` / `toggle_ai_servers.sh` flows map one-to-one onto `porcaria` subcommands:
+Recommended Hyprland keybinds:
 
-| Keybind           | Legacy bash                                   | Porcaria                                    |
-|-------------------|-----------------------------------------------|---------------------------------------------|
-| Super+Alt+D       | `toggle_dictation.sh`                         | `porcaria dictate`                          |
-| Super+Alt+Shift+D | `toggle_dictation.sh --ai-clean`              | `porcaria dictate --clean`                  |
-| Super+Alt+V       | `toggle_dictation.sh --fazerei`               | `porcaria dictate --route task`             |
-| Super+Alt+N       | `toggle_dictation.sh --quick-note`            | `porcaria dictate --sinks note`             |
-| Super+Alt+Shift+N | `toggle_dictation.sh --quick-note --ai-clean` | `porcaria dictate --clean --sinks note`     |
-| Super+Alt+L       | `toggle_ai_servers.sh --small`                | `porcaria serve all --toggle --model small` |
-| Super+Alt+Shift+L | `toggle_ai_servers.sh --large`                | `porcaria serve all --toggle --model large` |
+| Keybind           | Command                                     |
+|-------------------|---------------------------------------------|
+| Super+Alt+D       | `porcaria dictate`                          |
+| Super+Alt+Shift+D | `porcaria dictate --clean`                  |
+| Super+Alt+V       | `porcaria dictate --route task`             |
+| Super+Alt+N       | `porcaria dictate --sinks note`             |
+| Super+Alt+Shift+N | `porcaria dictate --clean --sinks note`     |
+| Super+Alt+L       | `porcaria serve all --toggle --model small` |
+| Super+Alt+Shift+L | `porcaria serve all --toggle --model large` |
 
 Paste into `~/.config/hypr/hyprland.conf`:
 

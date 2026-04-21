@@ -6,7 +6,8 @@ from typing import Annotated
 
 import typer
 
-from porcaria.cli._common import legacy_servers, try_rpc
+from porcaria import notify
+from porcaria.cli._common import try_rpc
 
 
 def _announce(msg: str) -> None:
@@ -14,6 +15,15 @@ def _announce(msg: str) -> None:
     sees it before any long-blocking RPC."""
     typer.secho(msg, fg=typer.colors.CYAN, err=True)
     sys.stderr.flush()
+
+
+def _fail_no_daemon() -> None:
+    """Exit with a daemon-not-running error, also sent as a desktop
+    notification so Hyprland keybinds don't fail silently."""
+    msg = "daemon not running; run `porcaria daemon start` first"
+    typer.secho(msg, fg=typer.colors.YELLOW, err=True)
+    notify.error("porcaria", msg)
+    raise typer.Exit(2)
 
 app = typer.Typer(
     help=(
@@ -53,7 +63,7 @@ def all_(
             help=(
                 "Toggle: start the stack if nothing is running, stop it if anything is. "
                 "Use this for a single Hyprland keybind that both starts and stops the "
-                "servers (matches the old `toggle_ai_servers.sh` behavior)."
+                "servers."
             ),
         ),
     ] = False,
@@ -74,8 +84,7 @@ def all_(
         )
         resp = try_rpc("servers.toggle", {"model": model})
         if resp is None:
-            rc = legacy_servers([f"--{model}"])  # legacy script is itself a toggle
-            raise typer.Exit(rc)
+            _fail_no_daemon()
         from porcaria.cli._common import print_rpc
 
         print_rpc(resp)
@@ -85,8 +94,7 @@ def all_(
         _announce("Stopping all local model servers…")
         resp = try_rpc("servers.stop", {"which": "all"})
         if resp is None:
-            rc = legacy_servers([])  # legacy script auto-toggles: if running, stops
-            raise typer.Exit(rc)
+            _fail_no_daemon()
         from porcaria.cli._common import print_rpc
 
         print_rpc(resp)
@@ -100,8 +108,7 @@ def all_(
     )
     resp = try_rpc("servers.start", {"which": "all", "model": model})
     if resp is None:
-        rc = legacy_servers([f"--{model}"])
-        raise typer.Exit(rc)
+        _fail_no_daemon()
     from porcaria.cli._common import print_rpc
 
     print_rpc(resp)
@@ -123,7 +130,7 @@ def asr(
     resp = try_rpc(method, {"which": "asr"})
     if resp is None:
         typer.secho(
-            "daemon not running; per-service start/stop needs the daemon (use `porcaria serve all` for legacy behavior)",
+            "daemon not running; run `porcaria daemon start` first",
             fg=typer.colors.YELLOW,
             err=True,
         )
