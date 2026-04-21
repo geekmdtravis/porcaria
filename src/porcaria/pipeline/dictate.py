@@ -1,6 +1,7 @@
 """Dictation orchestrator. Wraps capture + ASR + LLM + sink routing."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -38,8 +39,43 @@ def _record_start_file() -> Any:
     return paths.runtime_dir() / "dictation.start_ns"
 
 
-def start_recording(cfg: Config) -> dict:
-    """Start ffmpeg recording. Returns daemon-facing summary."""
+def _record_flags_file() -> Any:
+    from porcaria import paths
+
+    return paths.runtime_dir() / "dictation.flags.json"
+
+
+def _write_start_flags(flags: dict) -> None:
+    try:
+        _record_flags_file().write_text(json.dumps(flags))
+    except OSError as e:
+        log.warning("could not persist dictation start flags: %s", e)
+
+
+def _read_start_flags() -> dict:
+    p = _record_flags_file()
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text())
+        p.unlink(missing_ok=True)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def start_recording(
+    cfg: Config,
+    *,
+    clean: bool = False,
+    note: bool = False,
+    route: str = "auto",
+    profile_name: str | None = None,
+) -> dict:
+    """Start ffmpeg recording. Returns daemon-facing summary.
+
+    Flags are persisted so a bare `porcaria dictate` (same keybind pressed
+    again, no flags) can pick them up at stop time."""
     if recorder.is_recording():
         return {"status": "already_recording"}
     pid = recorder.start(
@@ -49,6 +85,9 @@ def start_recording(cfg: Config) -> dict:
         max_duration_s=cfg.capture.timeout_seconds,
     )
     _record_start_file().write_text(str(time.time_ns()))
+    _write_start_flags(
+        {"clean": clean, "note": note, "route": route, "profile": profile_name}
+    )
     notify.send(
         "Dictation",
         "Recording… toggle the key again to stop.",
@@ -256,9 +295,24 @@ def toggle(
     route: str = "auto",
     profile_name: str | None = None,
 ) -> dict:
-    """Start recording if stopped; stop+process if recording."""
+    """Start recording if stopped; stop+process if recording.
+
+    On stop, flags saved at start are applied unless the current call
+    explicitly overrides them. The override rule is "explicit != default":
+    a bare `porcaria dictate` reuses the start-time flags; `porcaria dictate
+    --route note` overrides just `route` while keeping any other saved flags.
+    """
     if recorder.is_recording():
+        saved = _read_start_flags()
+        effective_clean = clean or bool(saved.get("clean"))
+        effective_note = note or bool(saved.get("note"))
+        effective_route = route if route != "auto" else saved.get("route", "auto")
+        effective_profile = profile_name if profile_name is not None else saved.get("profile")
         return stop_and_process(
-            cfg, clean=clean, note=note, route=route, profile_name=profile_name
+            cfg,
+            clean=effective_clean,
+            note=effective_note,
+            route=effective_route,
+            profile_name=effective_profile,
         )
-    return start_recording(cfg)
+    return start_recording(cfg, clean=clean, note=note, route=route, profile_name=profile_name)

@@ -97,6 +97,20 @@ async def h_servers_stop(st: State, params: dict) -> dict:
     return await asyncio.to_thread(supervisor.stop_one, which)
 
 
+async def h_servers_toggle(st: State, params: dict) -> dict:
+    """If any supervised server is up, stop them all; otherwise start the full stack."""
+    model = params.get("model", "small")
+    if model not in {"small", "large"}:
+        raise ValueError("model must be 'small' or 'large'")
+    health = await asyncio.to_thread(supervisor.health_snapshot, st.cfg)
+    running = any(v.get("ok") for v in health.values())
+    if running:
+        result = await asyncio.to_thread(supervisor.stop_all)
+        return {"action": "stopped", **result}
+    result = await asyncio.to_thread(supervisor.start_all, st.cfg, model)
+    return {"action": "started", **result}
+
+
 # ----- pipeline handlers (Phase 2): transcribe / speak / clean -----
 
 
@@ -216,6 +230,7 @@ HANDLERS: dict[str, Handler] = {
     "reload": h_reload,
     "servers.start": h_servers_start,
     "servers.stop": h_servers_stop,
+    "servers.toggle": h_servers_toggle,
     "shutdown": h_shutdown,
     "transcribe": h_transcribe,
     "speak": h_speak,

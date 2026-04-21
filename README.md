@@ -19,9 +19,11 @@ Run these four commands once after install:
 ```sh
 porcaria config edit                # seed + open ~/.config/porcaria/config.toml in $EDITOR
 porcaria daemon start               # background daemon (UDS at $XDG_RUNTIME_DIR/porcaria/)
-porcaria serve all --model small    # spin up local Parakeet + Kokoro + llama.cpp
+porcaria serve all --model small    # spin up local Parakeet + Kokoro + llama.cpp (~7 s)
 porcaria status                     # confirm providers + servers are healthy
 ```
+
+To tear everything down: `porcaria serve all --stop`. For a one-key toggle suitable for a Hyprland bind, use `porcaria serve all --toggle` (see the keybind section below).
 
 After any `porcaria config edit`, run `porcaria daemon reload` so the daemon picks up the changes.
 
@@ -39,8 +41,9 @@ After any `porcaria config edit`, run `porcaria daemon reload` so the daemon pic
 | `porcaria clean --in notes.txt`                | Run text through the LLM cleanup pass                              |
 | `porcaria task "add pay rent to personal"`     | Execute a voice-style command without audio capture                |
 | `porcaria status`                              | JSON snapshot: active profile + server health                      |
-| `porcaria serve all --model small` / `--large` | Start local model servers (small ≈ Qwen3-4B, large ≈ gpt-oss-120b) |
+| `porcaria serve all --model small` / `--large` | Start local model servers (small ≈ Qwen3-4B, large ≈ gpt-oss-120b); idempotent no-op if already up |
 | `porcaria serve all --stop`                    | Stop all local model servers                                       |
+| `porcaria serve all --toggle`                  | Start if stopped, stop if running — the one-keybind behaviour       |
 | `porcaria daemon {start,stop,status,reload}`   | Daemon lifecycle                                                   |
 | `porcaria config {show,path,edit,validate,defaults}` | Config inspection + editing                                  |
 
@@ -55,8 +58,8 @@ The old `toggle_dictation.sh` / `toggle_ai_servers.sh` flows map one-to-one onto
 | Super+Alt+V       | `toggle_dictation.sh --fazerei`               | `porcaria dictate --route task`      |
 | Super+Alt+N       | `toggle_dictation.sh --quick-note`            | `porcaria dictate --note`            |
 | Super+Alt+Shift+N | `toggle_dictation.sh --quick-note --ai-clean` | `porcaria dictate --clean --note`    |
-| Super+Alt+L       | `toggle_ai_servers.sh --small`                | `porcaria serve all --model small`   |
-| Super+Alt+Shift+L | `toggle_ai_servers.sh --large`                | `porcaria serve all --model large`   |
+| Super+Alt+L       | `toggle_ai_servers.sh --small`                | `porcaria serve all --toggle --model small` |
+| Super+Alt+Shift+L | `toggle_ai_servers.sh --large`                | `porcaria serve all --toggle --model large` |
 
 Paste into `~/.config/hypr/hyprland.conf`:
 
@@ -66,9 +69,14 @@ bind = SUPER_ALT_SHIFT, D, exec, porcaria dictate --clean
 bind = SUPER_ALT,       V, exec, porcaria dictate --route task
 bind = SUPER_ALT,       N, exec, porcaria dictate --note
 bind = SUPER_ALT_SHIFT, N, exec, porcaria dictate --clean --note
-bind = SUPER_ALT,       L, exec, porcaria serve all --model small
-bind = SUPER_ALT_SHIFT, L, exec, porcaria serve all --model large
+bind = SUPER_ALT,       L, exec, porcaria serve all --toggle --model small
+bind = SUPER_ALT_SHIFT, L, exec, porcaria serve all --toggle --model large
 ```
+
+### How the keybinds behave
+
+- **Dictation** (`D`, `Shift+D`, `V`, `N`, `Shift+N`): press to start recording, press the *same* keybind again to stop. Flags given at start (`--clean`, `--note`, `--route task`) are persisted and applied at stop automatically — you don't need to repeat them, but you can override them on the stop press (e.g. start with `--clean`, stop with `--route note` to save a cleaned note instead of copying).
+- **Servers** (`L`, `Shift+L`): `--toggle` means one key both launches and tears down the whole stack. Press once → kokoro/parakeet/llama.cpp come up (~7 s, with desktop notifications per service). Press again → they all stop. Swap between `--model small` and `--model large` by using `Shift+L` — if the other size is already running, only the llama.cpp process is swapped (kokoro + parakeet stay warm).
 
 ## Pipe examples
 

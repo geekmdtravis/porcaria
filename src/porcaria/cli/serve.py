@@ -46,8 +46,41 @@ def all_(
             help="Stop every running local server instead of starting them.",
         ),
     ] = False,
+    toggle: Annotated[
+        bool,
+        typer.Option(
+            "--toggle",
+            help=(
+                "Toggle: start the stack if nothing is running, stop it if anything is. "
+                "Use this for a single Hyprland keybind that both starts and stops the "
+                "servers (matches the old `toggle_ai_servers.sh` behavior)."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Start (or stop with --stop) every local model server in one shot."""
+    """Start, stop, or toggle every local model server in one shot.
+
+    Default is idempotent-start (no-op if already running). Pass --stop to stop
+    everything, or --toggle to flip state — use --toggle in Hyprland keybinds so
+    one key both launches and tears down the stack."""
+    if stop and toggle:
+        typer.secho("--stop and --toggle are mutually exclusive", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+
+    if toggle:
+        _announce(
+            f"Toggling model servers (will start kokoro → parakeet → llama.cpp "
+            f"({model}) if stopped, or stop them if running)."
+        )
+        resp = try_rpc("servers.toggle", {"model": model})
+        if resp is None:
+            rc = legacy_servers([f"--{model}"])  # legacy script is itself a toggle
+            raise typer.Exit(rc)
+        from porcaria.cli._common import print_rpc
+
+        print_rpc(resp)
+        return
+
     if stop:
         _announce("Stopping all local model servers…")
         resp = try_rpc("servers.stop", {"which": "all"})

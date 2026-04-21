@@ -63,7 +63,12 @@ def main(
     First invocation starts recording from the configured PulseAudio source.
     Second invocation stops recording, transcribes via the active ASR provider,
     optionally runs the text through the LLM (--clean), and sends the result to
-    the selected sink (--route)."""
+    the selected sink (--route).
+
+    You can pass flags on either press — whatever you set at start is persisted
+    and reused at stop, so pressing the same Hyprland keybind twice works
+    naturally. If you pass a flag at stop, it overrides the saved value for
+    that flag only."""
     params = {"clean": clean, "note": note, "route": route, "profile": profile}
     resp = try_rpc("dictate.toggle", params)
     if resp is not None:
