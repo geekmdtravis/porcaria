@@ -23,6 +23,7 @@ app = typer.Typer(
         "`transcribe`, `speak`, `clean`, `task`) require it to be running."
     ),
     no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 PID_FILE = "porcaria.pid"

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 
-from porcaria import paths
+from porcaria import notify, paths
 from porcaria.config.schema import Config
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,20 @@ def _alive(pid: int) -> bool:
         return True
 
 
+def _reaped(pid: int) -> bool:
+    """True if the process is gone (exited and reaped OR never existed).
+    os.kill(pid, 0) reports zombies as alive, so also try waitpid(WNOHANG)
+    to either reap our own child or confirm it's not ours anymore."""
+    try:
+        reaped, _status = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        # Not our child or already reaped by someone else.
+        return not _alive(pid)
+    if reaped != 0:
+        return True
+    return not _alive(pid)
+
+
 def _kill(pid: int, *, timeout_s: float = 10.0) -> bool:
     """SIGTERM, wait, then SIGKILL. Returns True if the process is gone."""
     try:
@@ -83,15 +97,19 @@ def _kill(pid: int, *, timeout_s: float = 10.0) -> bool:
         return True
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        if not _alive(pid):
+        if _reaped(pid):
             return True
         time.sleep(0.1)
     try:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:
         return True
-    time.sleep(0.2)
-    return not _alive(pid)
+    end = time.monotonic() + 0.5
+    while time.monotonic() < end:
+        if _reaped(pid):
+            return True
+        time.sleep(0.05)
+    return False
 
 
 # --------------------------- spec builders ---------------------------
@@ -126,11 +144,37 @@ def _llama_spec(cfg: Config, model: str) -> ServerSpec:
     )
 
 
+def _resolve_python(configured: str, uv_tool_names: tuple[str, ...]) -> str:
+    """Pick the python that has the heavy ML deps installed.
+
+    Order: explicit config > first matching uv-tool venv > daemon's own sys.executable.
+    The uv-tool venv path convention is $HOME/.local/share/uv/tools/<name>/bin/python.
+    """
+    if configured:
+        return configured
+    home = Path(os.path.expanduser("~"))
+    for name in uv_tool_names:
+        candidate = home / ".local/share/uv/tools" / name / "bin" / "python"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return sys.executable
+
+
+def _server_script(module: str) -> str:
+    """Absolute path to a porcaria server module, so it can run under any
+    interpreter that has the heavy ML deps but doesn't need porcaria installed."""
+    import importlib.util
+    spec = importlib.util.find_spec(module)
+    if spec is None or spec.origin is None:
+        raise RuntimeError(f"cannot locate server module: {module}")
+    return spec.origin
+
+
 def _parakeet_spec(cfg: Config) -> ServerSpec:
     s = cfg.servers.parakeet
-    python = s.python_executable or sys.executable
+    python = _resolve_python(s.python_executable, ("nano-parakeet",))
     argv = [
-        python, "-u", "-m", "porcaria.asr.parakeet_server",
+        python, "-u", _server_script("porcaria.asr.parakeet_server"),
         "--port", str(s.port),
         "--device", s.device,
         "--model", s.model,
@@ -140,16 +184,16 @@ def _parakeet_spec(cfg: Config) -> ServerSpec:
         argv=argv,
         health_url=f"{cfg.asr.parakeet.url}/health",
         health_timeout_s=120.0,
-        extra_state={"model": s.model, "device": s.device},
+        extra_state={"model": s.model, "device": s.device, "python": python},
     )
 
 
 def _kokoro_spec(cfg: Config) -> ServerSpec:
     s = cfg.servers.kokoro
     k = cfg.tts.kokoro
-    python = s.python_executable or sys.executable
+    python = _resolve_python(s.python_executable, ("kokoro-tts",))
     argv = [
-        python, "-u", "-m", "porcaria.tts.kokoro_server",
+        python, "-u", _server_script("porcaria.tts.kokoro_server"),
         "--port", str(s.port),
         "--model", str(paths.expand(k.model_path)),
         "--voices", str(paths.expand(k.voices_path)),
@@ -159,7 +203,7 @@ def _kokoro_spec(cfg: Config) -> ServerSpec:
         argv=argv,
         health_url=f"{k.url}/health",
         health_timeout_s=30.0,
-        extra_state={},
+        extra_state={"python": python},
     )
 
 
@@ -175,6 +219,9 @@ def _spawn(spec: ServerSpec) -> dict:
     log_path = _log_file(spec.name)
     fh = log_path.open("ab", buffering=0)
     fh.write(f"\n--- porcaria supervisor starting {spec.name} at {int(time.time())} ---\n".encode())
+    t_start = time.monotonic()
+    log.info("supervisor: spawning %s (health timeout %.0fs)", spec.name, spec.health_timeout_s)
+    notify.info("porcaria", f"starting {spec.name}…")
     try:
         proc = subprocess.Popen(  # noqa: S603
             spec.argv,
@@ -185,33 +232,50 @@ def _spawn(spec: ServerSpec) -> dict:
         )
     except FileNotFoundError as e:
         fh.close()
+        log.warning("supervisor: %s executable not found: %s", spec.name, e)
+        notify.warn("porcaria", f"{spec.name} failed: executable not found")
         return {"status": "error", "error": f"executable not found: {e}"}
 
     _pid_file(spec.name).write_text(str(proc.pid))
     for key, val in spec.extra_state.items():
         _state_file(spec.name, key).write_text(val)
 
-    ok = _wait_for_health(spec.health_url, spec.health_timeout_s)
+    ok, reason = _wait_for_health(spec.health_url, spec.health_timeout_s, proc=proc)
+    elapsed = time.monotonic() - t_start
     if not ok:
-        # Startup failed. Kill the child and clean up.
+        # Startup failed. Kill the child (no-op if already dead) and clean up.
         _kill(proc.pid)
         _pid_file(spec.name).unlink(missing_ok=True)
         tail = _tail(log_path, 40)
-        return {"status": "error", "error": "health check timed out", "log_tail": tail}
-    return {"status": "started", "pid": proc.pid, **spec.extra_state}
+        log.warning("supervisor: %s %s after %.1fs", spec.name, reason, elapsed)
+        notify.warn("porcaria", f"{spec.name} failed to start ({reason})")
+        return {"status": "error", "error": reason, "elapsed_s": round(elapsed, 1), "log_tail": tail}
+    log.info("supervisor: %s ready in %.1fs", spec.name, elapsed)
+    notify.info("porcaria", f"{spec.name} ready ({elapsed:.0f}s)")
+    return {"status": "started", "pid": proc.pid, "elapsed_s": round(elapsed, 1), **spec.extra_state}
 
 
-def _wait_for_health(url: str, timeout_s: float, interval_s: float = 0.5) -> bool:
+def _wait_for_health(
+    url: str,
+    timeout_s: float,
+    *,
+    proc: subprocess.Popen[bytes] | None = None,
+    interval_s: float = 0.5,
+) -> tuple[bool, str]:
+    """Poll `url` until 200 OK or the deadline lapses. If `proc` is given and
+    it exits before /health comes up, fail fast with a meaningful reason."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
+        if proc is not None and proc.poll() is not None:
+            return False, f"process exited early (rc={proc.returncode})"
         try:
             r = httpx.get(url, timeout=2.0)
             if r.status_code == 200:
-                return True
+                return True, ""
         except httpx.HTTPError:
             pass
         time.sleep(interval_s)
-    return False
+    return False, f"health check timed out after {timeout_s:.0f}s"
 
 
 def _tail(path: Path, lines: int) -> str:
@@ -231,8 +295,13 @@ def _stop_one(name: str) -> dict:
     if not _alive(pid):
         _pid_file(name).unlink(missing_ok=True)
         return {"status": "not_running"}
+    log.info("supervisor: stopping %s (pid %d)", name, pid)
     ok = _kill(pid)
     _pid_file(name).unlink(missing_ok=True)
+    if ok:
+        notify.info("porcaria", f"{name} stopped")
+    else:
+        notify.warn("porcaria", f"{name} kill failed (pid {pid})")
     return {"status": "stopped" if ok else "kill_failed", "pid": pid}
 
 

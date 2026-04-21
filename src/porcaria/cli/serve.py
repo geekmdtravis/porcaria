@@ -1,11 +1,19 @@
 """`porcaria serve {all,asr,tts,llm}` — start/stop local model servers."""
 from __future__ import annotations
 
+import sys
 from typing import Annotated
 
 import typer
 
 from porcaria.cli._common import legacy_servers, try_rpc
+
+
+def _announce(msg: str) -> None:
+    """Emit a CYAN status line to stderr and flush immediately so the user
+    sees it before any long-blocking RPC."""
+    typer.secho(msg, fg=typer.colors.CYAN, err=True)
+    sys.stderr.flush()
 
 app = typer.Typer(
     help=(
@@ -14,6 +22,7 @@ app = typer.Typer(
         "any servers started."
     ),
     no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
@@ -40,6 +49,7 @@ def all_(
 ) -> None:
     """Start (or stop with --stop) every local model server in one shot."""
     if stop:
+        _announce("Stopping all local model servers…")
         resp = try_rpc("servers.stop", {"which": "all"})
         if resp is None:
             rc = legacy_servers([])  # legacy script auto-toggles: if running, stops
@@ -49,6 +59,12 @@ def all_(
         print_rpc(resp)
         return
 
+    _announce(
+        f"Starting kokoro → parakeet → llama.cpp ({model}). The daemon waits for "
+        "each /health endpoint before starting the next, so first launch can take "
+        "a few minutes (model weights load on GPU). You'll see desktop notifications "
+        "as each service comes up."
+    )
     resp = try_rpc("servers.start", {"which": "all", "model": model})
     if resp is None:
         rc = legacy_servers([f"--{model}"])
@@ -67,6 +83,10 @@ def asr(
 ) -> None:
     """Start (or stop with --stop) the local ASR server (Parakeet by default)."""
     method = "servers.stop" if stop else "servers.start"
+    _announce(
+        "Stopping ASR server…" if stop
+        else "Starting ASR server (parakeet)… up to 2 minutes on first launch."
+    )
     resp = try_rpc(method, {"which": "asr"})
     if resp is None:
         typer.secho(
@@ -89,6 +109,10 @@ def tts(
 ) -> None:
     """Start (or stop with --stop) the local TTS server (Kokoro by default)."""
     method = "servers.stop" if stop else "servers.start"
+    _announce(
+        "Stopping TTS server…" if stop
+        else "Starting TTS server (kokoro)… ready in a few seconds."
+    )
     resp = try_rpc(method, {"which": "tts"})
     if resp is None:
         typer.secho("daemon not running", fg=typer.colors.YELLOW, err=True)
@@ -117,6 +141,10 @@ def llm(
 ) -> None:
     """Start (or stop with --stop) the local LLM server (llama.cpp by default)."""
     method = "servers.stop" if stop else "servers.start"
+    _announce(
+        "Stopping LLM server…" if stop
+        else f"Starting LLM server (llama.cpp {model})… up to 4 minutes on first launch."
+    )
     resp = try_rpc(method, {"which": "llm", "model": model})
     if resp is None:
         typer.secho("daemon not running", fg=typer.colors.YELLOW, err=True)

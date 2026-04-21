@@ -20,6 +20,7 @@ app = typer.Typer(
         "defaults. Run `porcaria daemon reload` after editing to apply changes."
     ),
     no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 

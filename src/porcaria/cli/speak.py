@@ -8,6 +8,7 @@ from typing import Annotated
 
 import typer
 
+from porcaria.audio.player import play_bytes
 from porcaria.cli._common import try_rpc
 
 
@@ -44,14 +45,27 @@ def main(
         typer.Option(
             "--out",
             help=(
-                "Write the synthesized audio to this WAV file instead of playing it. "
-                "If omitted, the raw WAV bytes are streamed to the audio player "
-                "(wl-play/paplay/ffplay — whichever is available)."
+                "Write the synthesized audio to this WAV file instead of playing it."
             ),
         ),
     ] = None,
+    stdout: Annotated[
+        bool,
+        typer.Option(
+            "--stdout",
+            help=(
+                "Write raw WAV bytes to stdout instead of playing. Useful for piping "
+                "into an alternative player: `porcaria speak foo --stdout | pw-play -`."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Synthesize speech from text via the active TTS provider and play or save it.
+    """Synthesize speech from text via the active TTS provider.
+
+    Default behavior: play through speakers when running in a terminal; write
+    WAV bytes to stdout when stdout is a pipe or redirection (so pipelines like
+    `porcaria speak foo | aplay` still work). Pass --out PATH to save to a file,
+    or --stdout to force pipe mode even on a TTY.
 
     Requires the daemon to be running (`porcaria daemon start`)."""
     if text == "-":
@@ -68,8 +82,21 @@ def main(
         typer.secho(f"error: {err.get('code')}: {err.get('message')}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     wav = base64.b64decode((resp.result or {}).get("wav_b64", ""))
+
     if out is not None:
         out.write_bytes(wav)
         typer.echo(str(out))
-    else:
+        return
+
+    if stdout or not sys.stdout.isatty():
         sys.stdout.buffer.write(wav)
+        return
+
+    if not play_bytes(wav):
+        typer.secho(
+            "no audio player found (install pw-play, ffplay, or paplay — "
+            "or use --out PATH / --stdout)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)

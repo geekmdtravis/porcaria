@@ -5,6 +5,8 @@ import typer
 
 from porcaria.cli import clean, config as config_cmd, daemon, dictate, serve, speak, status, task, transcribe
 
+HELP_OPTS = {"help_option_names": ["-h", "--help"]}
+
 app = typer.Typer(
     name="porcaria",
     help=(
@@ -17,6 +19,7 @@ app = typer.Typer(
     ),
     no_args_is_help=True,
     add_completion=False,
+    context_settings=HELP_OPTS,
 )
 
 app.command("dictate")(dictate.main)
@@ -30,16 +33,19 @@ app.add_typer(
     serve.app,
     name="serve",
     help="Start or stop local model servers (Parakeet ASR / Kokoro TTS / llama.cpp LLM).",
+    context_settings=HELP_OPTS,
 )
 app.add_typer(
     daemon.app,
     name="daemon",
     help="Start, stop, and reload the long-lived porcaria daemon.",
+    context_settings=HELP_OPTS,
 )
 app.add_typer(
     config_cmd.app,
     name="config",
     help="Inspect, edit, and validate the porcaria config.",
+    context_settings=HELP_OPTS,
 )
 
 
