@@ -123,8 +123,15 @@ def test_hash_mismatch_triggers_redownload(tmp_path: Path, monkeypatch: pytest.M
         {cfg.model_url: _FakeResp([good_model], headers={"content-length": str(len(good_model))})},
     )
 
+    info_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(kd.notify, "info", lambda title, body="": info_calls.append((title, body)) or True)
+
     ensure_kokoro_assets(cfg)
     assert Path(cfg.model_path).read_bytes() == good_model
+    # The drifted model should have produced a user-visible "hash pin drifted" notification
+    # before the re-download started. Voices were already valid, so no drift notification for them.
+    drift_bodies = [body for _title, body in info_calls if "hash pin drifted" in body]
+    assert drift_bodies == [f"kokoro model: hash pin drifted, re-fetching…"]
 
 
 def test_truncated_response_raises_and_leaves_no_final_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

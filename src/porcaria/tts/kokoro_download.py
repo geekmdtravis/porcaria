@@ -92,6 +92,7 @@ def _ensure_one(asset: _Asset, *, auto_download: bool, force: bool) -> None:
         if _hash_ok(asset.dest, asset.sha256):
             return
         log.warning("kokoro %s at %s failed hash check; re-fetching", asset.label, asset.dest)
+        notify.info("porcaria", f"kokoro {asset.label}: hash pin drifted, re-fetching…")
     if not auto_download:
         raise KokoroAssetError(
             f"kokoro {asset.label} missing or invalid at {asset.dest} and auto_download is disabled"
