@@ -77,18 +77,17 @@ def stop_and_process(
     if not recorder.is_recording():
         return {"status": "not_recording"}
 
-    t0 = time.monotonic()
+    t_stop_start = time.monotonic()
     start_ns = _read_start_ns()
     wav = recorder.stop()
-    t1 = _stage("recorder.stop", t0)
+    t_after_stop = _stage("recorder.stop", t_stop_start)
     notify.info("Dictation", f"Transcribing ({len(wav)//1024} KB)…")
-    t2 = _stage("notify.transcribing", t1)
 
     prof = cfg.profile(profile_name)
     asr = get_asr(cfg, prof.asr)
-    t3 = _stage("get_asr", t2)
+    t_before_asr = time.monotonic()
     transcript = asr.transcribe(wav)
-    t4 = _stage("asr.transcribe", t3)
+    t_after_asr = _stage("asr.transcribe", t_before_asr)
     if not transcript.strip():
         notify.warn("Dictation", "No speech detected")
         return {"status": "empty_transcript"}
@@ -108,18 +107,38 @@ def stop_and_process(
     if route == "task":
         res = _handle_fazerei(cfg, transcript, prof_llm=prof.llm, tts_name=prof.tts, ctx=ctx)
         sink_results.append({"sink": "fazerei", **res.__dict__})
-        return _finish(start_ns, transcript, sink_results)
+        return _finish(
+            start_ns,
+            t_stop_start,
+            transcript,
+            sink_results,
+            t_stop=t_after_stop - t_stop_start,
+            t_asr=t_after_asr - t_before_asr,
+            wav_bytes=len(wav),
+        )
 
     text_for_sinks = llm_output if llm_output is not None else transcript
 
+    t_sinks_start = time.monotonic()
     if route in ("auto", "clipboard") and route != "note":
         r = ClipboardSink(cfg.sinks.clipboard).handle(transcript, text_for_sinks if clean else None)
         sink_results.append({"sink": "clipboard", **r.__dict__})
     if note or route == "note":
         r = QuickNoteSink(cfg.sinks.quick_note).handle(transcript, text_for_sinks if clean else None)
         sink_results.append({"sink": "quick_note", **r.__dict__})
+    _stage("sinks", t_sinks_start)
 
-    return _finish(start_ns, transcript, sink_results, llm_output=llm_output)
+    return _finish(
+        start_ns,
+        t_stop_start,
+        transcript,
+        sink_results,
+        llm_output=llm_output,
+        t_stop=t_after_stop - t_stop_start,
+        t_asr=t_after_asr - t_before_asr,
+        t_sinks=time.monotonic() - t_sinks_start,
+        wav_bytes=len(wav),
+    )
 
 
 # ---------- internals ----------
@@ -191,22 +210,41 @@ def _read_start_ns() -> int | None:
 
 def _finish(
     start_ns: int | None,
+    t_stop_start: float,
     transcript: str,
     sink_results: list[dict],
+    *,
     llm_output: str | None = None,
+    t_stop: float = 0.0,
+    t_asr: float = 0.0,
+    t_sinks: float = 0.0,
+    wav_bytes: int = 0,
 ) -> dict:
-    elapsed_ms = (time.time_ns() - start_ns) // 1_000_000 if start_ns else None
+    total_ms = (time.time_ns() - start_ns) // 1_000_000 if start_ns else None
+    # "processing" = after the user hit stop, excluding the recording duration.
+    processing_ms = int((time.monotonic() - t_stop_start) * 1000)
+    recording_ms = (total_ms - processing_ms) if total_ms is not None else None
     char_count = len(transcript)
     notify.info(
         "Dictation",
-        f"Done • {char_count} chars" + (f" • {elapsed_ms / 1000:.1f}s" if elapsed_ms else ""),
+        f"Done • {char_count} chars • "
+        + (f"rec {recording_ms / 1000:.1f}s, " if recording_ms is not None else "")
+        + f"asr {t_asr:.2f}s",
     )
     return {
         "status": "processed",
         "transcript": transcript,
         "llm_output": llm_output,
         "sinks": sink_results,
-        "elapsed_ms": elapsed_ms,
+        "timings": {
+            "recording_ms": recording_ms,
+            "processing_ms": processing_ms,
+            "stop_ms": int(t_stop * 1000),
+            "asr_ms": int(t_asr * 1000),
+            "sinks_ms": int(t_sinks * 1000),
+            "wav_bytes": wav_bytes,
+        },
+        "elapsed_ms": total_ms,
     }
 
 
