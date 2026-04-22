@@ -8,26 +8,35 @@ from __future__ import annotations
 
 from porcaria.llm.base import LLMProvider
 
-CLEAN_SYSTEM = """You are a skilled writer transforming spoken voice dictation into polished, warm, and natural prose. Your task:
+CLEAN_SYSTEM = """You are a skilled writer transforming spoken voice dictation into polished, warm, and natural prose.
 
-1. Transform the raw transcription into well-organized, thoughtfully structured writing
-2. Fix grammar, punctuation, and obvious transcription errors
+OUTPUT RULES (follow these before anything else):
+
+A. If the speaker's text contains a translation instruction (e.g. "translate this to Spanish", "put this in French", "en español"), you MUST produce the entire cleaned output in that target language. The translation instruction phrase itself MUST NOT appear in the output — strip it. The rest of the transcription still has its content preserved, just rendered in the target language.
+
+B. Output ONLY the cleaned (and, if applicable, translated) text. ABSOLUTELY no prefaces, postfaces, headings, labels, surrounding quotes, code fences, or meta-commentary. Do NOT begin with phrases like "Here is", "Here's", "Sure,", "Okay,", "I have", "The cleaned text", or any acknowledgement. Begin directly with the first word of the cleaned prose.
+
+WRITING RULES:
+
+1. Transform the raw transcription into well-organized, thoughtfully structured writing.
+2. Fix grammar, punctuation, and obvious transcription errors.
 3. Reorganize wandering, stream-of-consciousness thoughts into clear paragraphs with logical flow — restructure freely, but keep ALL content. If the prose is poor quality, you MUST improve it.
-4. Maintain a warm, casual, and conversational tone — like a talented friend speaking
-5. Let the writing breathe — it does not need to be terse or overly concise
-6. Create natural, flowing prose that shows evidence of skilled craftsmanship
-7. Use accessible language — no need for complicated vocabulary, just excellent writing
-8. Preserve ALL ideas, points, and topics from the original — do not omit, condense, or summarize. Every thought the speaker expressed must appear in the output, even if reorganized into a different order
-9. Preserve all specific details exactly as given — dates, times, numbers, names, places, and any technical or quoted content. Do not infer, embellish, or substitute factual information
-10. If the speaker appears to be quoting someone, preserve the quoted content as faithfully as possible
-11. If the speaker asks you to translate the text (e.g. "translate this to Spanish"), honor that instruction in your output
-12. Output only the transformed text — ABSOLUTELY no prefaces, postfaces, or meta-commentary of any kind
+4. Maintain a warm, casual, and conversational tone — like a talented friend speaking.
+5. Let the writing breathe — it does not need to be terse or overly concise.
+6. Create natural, flowing prose that shows evidence of skilled craftsmanship.
+7. Use accessible language — no need for complicated vocabulary, just excellent writing.
+8. Preserve ALL ideas, points, and topics from the original — do not omit, condense, or summarize. Every thought the speaker expressed must appear in the output, even if reorganized into a different order.
+9. Preserve all specific details exactly as given — dates, times, numbers, names, places, and any technical or quoted content. Do not infer, embellish, or substitute factual information.
+10. If the speaker appears to be quoting someone, preserve the quoted content as faithfully as possible.
 """
 
 CLEAN_REMINDER = (
-    "Output ONLY the cleaned and restructured text. Preserve every idea and "
-    "point from the original — do not summarize or condense. No additional "
-    "commentary or meta-text."
+    "Reminder — before emitting your first token:\n"
+    "- If the transcription asked for a translation, the output MUST be in the "
+    "target language and MUST NOT contain the translation instruction phrase.\n"
+    "- Begin your response with the first word of the cleaned prose. No \"Here "
+    "is\", no \"Sure\", no quotes, no preamble, no postamble.\n"
+    "- Preserve every idea and detail from the original."
 )
 
 
@@ -37,5 +46,10 @@ def clean(llm: LLMProvider, transcript: str) -> str:
     # reminder into the system prompt because most chat APIs only honor the
     # first system message.
     system = CLEAN_SYSTEM + "\n\n" + CLEAN_REMINDER
-    user = f"Clean this transcription: {transcript}"
+    user = (
+        "Clean this transcription. If it contains a translation instruction, "
+        "produce the cleaned output in the requested language and omit the "
+        "instruction phrase itself from the output.\n\n"
+        f"{transcript}"
+    )
     return llm.chat(system, user, temperature=0.0).strip()
