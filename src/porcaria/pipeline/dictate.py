@@ -82,16 +82,16 @@ def start_recording(cfg: Config) -> dict:
             max_duration_s=cfg.capture.timeout_seconds,
         )
     except RecorderUnavailable as e:
-        notify.error("Dictation", str(e))
+        notify.error("Dictation unavailable", str(e))
         return {"status": "recorder_unavailable", "error": str(e)}
     except Exception as e:
-        notify.error("Dictation", f"Could not start recording: {e}")
+        notify.error("Dictation failed to start", str(e))
         raise
     _record_start_file().write_text(str(time.time_ns()))
     live_state.set_recording(True)
     notify.send(
-        "Dictation",
-        "Recording… toggle the key again to stop.",
+        "Dictation recording",
+        "Toggle the key again to stop.",
         urgency="normal",
         icon="dialog-information",
     )
@@ -135,7 +135,7 @@ def stop_and_process(
             "transcript will not be delivered anywhere."
         )
         log.warning(msg)
-        notify.warn("Dictation", msg)
+        notify.warn("Dictation has no sinks", msg)
     if route not in _VALID_ROUTES:
         raise ValueError(f"unknown route {route!r}; valid: {sorted(_VALID_ROUTES)}")
 
@@ -146,7 +146,7 @@ def stop_and_process(
     finally:
         live_state.set_recording(False)
     t_after_stop = _stage("recorder.stop", t_stop_start)
-    notify.info("Dictation", f"Transcribing ({len(wav)//1024} KB)…")
+    notify.info("Dictation transcribing", f"{len(wav)//1024} KB queued…")
     asr = get_asr(cfg, prof.asr)
     t_before_asr = time.monotonic()
     try:
@@ -158,15 +158,15 @@ def stop_and_process(
             f"ASR server '{prof.asr}' unreachable — start it with "
             "`porcaria serve all` (or `porcaria daemon` → toggle servers)."
         )
-        notify.error("Dictation", msg)
+        notify.error("ASR server unreachable", msg)
         log.warning("asr.transcribe connect failed: %s", e)
         return {"status": "asr_unreachable", "error": str(e), "provider": prof.asr}
     except Exception as e:
-        notify.error("Dictation", f"Transcription failed ({prof.asr}): {e}")
+        notify.error("Transcription failed", f"{prof.asr}: {e}")
         raise
     t_after_asr = _stage("asr.transcribe", t_before_asr)
     if not transcript.strip():
-        notify.warn("Dictation", "No speech detected")
+        notify.warn("No speech detected", "Your transcript was empty.")
         return {"status": "empty_transcript"}
 
     llm_output: str | None = None
@@ -178,7 +178,7 @@ def stop_and_process(
                 llm_output = clean_transcription(get_llm(cfg, prof.llm), transcript)
         except Exception as e:
             log.warning("cleanup failed; using raw transcript: %s", e)
-            notify.warn("Dictation", "AI cleanup failed, using raw transcription")
+            notify.warn("AI cleanup skipped", "Using raw transcription.")
 
     ctx = DictationContext(now=datetime.now(), profile=prof.asr + "/" + prof.llm, extras={})
     sink_results: list[dict] = []
@@ -203,7 +203,7 @@ def stop_and_process(
         else:  # should be unreachable — _parse_sinks already validated
             raise ValueError(f"unhandled sink {name!r}")
         if not r.ok:
-            notify.error(f"Dictation → {name}", r.message)
+            notify.error(f"Sink {name} failed", r.message)
         sink_results.append({"sink": name, **r.__dict__})
     _stage("sinks", t_sinks_start)
 
@@ -238,7 +238,7 @@ def _handle_fazerei(
         try:
             llm_output = llm.chat(system, transcript, temperature=0.0)
         except Exception as e:
-            notify.warn("Fazerei Buddy", f"LLM call failed: {e}")
+            notify.error("Task LLM failed", str(e))
             return SinkResult(ok=False, message=f"LLM call failed: {e}")
 
         result = sink.handle(transcript, llm_output)
@@ -248,14 +248,14 @@ def _handle_fazerei(
             try:
                 speak_text = summarize_for_speech(llm, result.artifact, original_question=transcript)
                 _speak(cfg, tts_name, speak_text)
-                notify.info("Fazerei Buddy", speak_text[:400])
+                notify.info("Task query result", speak_text[:400])
             except Exception as e:
                 log.warning("summarize/speak failed: %s", e)
 
         if result.ok:
-            notify.info("Fazerei Buddy", result.message)
+            notify.success("Task complete", result.message)
         else:
-            notify.warn("Fazerei Buddy", result.message)
+            notify.error("Task failed", result.message)
         return result
 
 
@@ -289,6 +289,23 @@ def _read_start_ns() -> int | None:
         return None
 
 
+def _successful_destinations(sink_results: list[dict]) -> list[str]:
+    """Names of destinations (sinks + task route) that successfully delivered.
+
+    Each sink appends ``{"sink": name, "ok": bool, ...}``; the task route
+    appends ``{"route": "task", "ok": bool, ...}``. We list only those with
+    ``ok == True`` — failed destinations get their own error notifications."""
+    dests: list[str] = []
+    for r in sink_results:
+        if not r.get("ok"):
+            continue
+        if r.get("route") == "task":
+            dests.append("task")
+        elif "sink" in r:
+            dests.append(r["sink"])
+    return dests
+
+
 def _finish(
     start_ns: int | None,
     t_stop_start: float,
@@ -306,12 +323,22 @@ def _finish(
     processing_ms = int((time.monotonic() - t_stop_start) * 1000)
     recording_ms = (total_ms - processing_ms) if total_ms is not None else None
     char_count = len(transcript)
-    notify.info(
-        "Dictation",
-        f"Done • {char_count} chars • "
-        + (f"rec {recording_ms / 1000:.1f}s, " if recording_ms is not None else "")
-        + f"asr {t_asr:.2f}s",
-    )
+    destinations = _successful_destinations(sink_results)
+    if destinations:
+        # Describe what actually happened to the transcript:
+        # "Dictation → clipboard", "Cleaned dictation → clipboard + note",
+        # "Dictation → task + clipboard", etc.
+        prefix = "Cleaned dictation" if llm_output is not None else "Dictation"
+        summary = f"{prefix} → {' + '.join(destinations)}"
+        notify.success(
+            summary,
+            f"{char_count} chars • "
+            + (f"rec {recording_ms / 1000:.1f}s, " if recording_ms is not None else "")
+            + f"asr {t_asr:.2f}s",
+        )
+    # Nothing delivered (no sinks / all failed / task failed with no sinks):
+    # the "no sinks configured" warning or per-sink error notifications have
+    # already told the user; don't stack a misleading success on top.
     return {
         "status": "processed",
         "transcript": transcript,

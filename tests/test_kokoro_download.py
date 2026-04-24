@@ -130,8 +130,8 @@ def test_hash_mismatch_triggers_redownload(tmp_path: Path, monkeypatch: pytest.M
     assert Path(cfg.model_path).read_bytes() == good_model
     # The drifted model should have produced a user-visible "hash pin drifted" notification
     # before the re-download started. Voices were already valid, so no drift notification for them.
-    drift_bodies = [body for _title, body in info_calls if "hash pin drifted" in body]
-    assert drift_bodies == [f"kokoro model: hash pin drifted, re-fetching…"]
+    drift_titles = [title for title, _body in info_calls if "hash drifted" in title]
+    assert drift_titles == ["Kokoro model hash drifted"]
 
 
 def test_truncated_response_raises_and_leaves_no_final_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

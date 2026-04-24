@@ -88,6 +88,8 @@ Worked example: press Super+Alt+D to start a rambling 3-minute monologue, realiz
 Two orthogonal dials control what `dictate` does with the transcript:
 
 - **`--route NAME`** picks the *processing pipeline* the transcript runs through. `default` (no extra processing) just hands off to sinks. `task` has the LLM interpret the utterance as a fazerei command and execute it. Future routes could translate, summarize, etc.
+
+  > **TODO — multiple task backends.** The task route currently hard-codes fazerei, so its desktop notifications ("Task complete" / "Task failed") don't name the underlying tool. When a second task backend lands, make those summaries descriptive (e.g. "Fazerei: task complete" / "Todoist: task complete") — mostly by pushing the backend name through `_handle_fazerei` in `src/porcaria/pipeline/dictate.py` or introducing per-backend notify wrappers.
 - **`--sinks LIST`** picks the *passive write destinations* for the transcript. `clipboard` copies to the system clipboard, `note` appends to a quick-note file, `speaker` synthesizes + plays the text back. Combine them with commas: `--sinks clipboard,note`.
 
 They're orthogonal — `--route task --sinks note` runs the command AND saves the raw utterance to a note for audit. Defaults: `--route default --sinks clipboard`.

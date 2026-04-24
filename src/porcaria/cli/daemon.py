@@ -53,6 +53,9 @@ def _alive(pid: int) -> bool:
         return True
 
 
+_VALID_NOTIFY_LEVELS = ("debug", "info", "warning", "error", "critical", "none")
+
+
 @app.command("start")
 def start(
     foreground: bool = typer.Option(
@@ -64,13 +67,17 @@ def start(
             "instead of double-forking into the background. Useful for debugging."
         ),
     ),
-    notify: bool = typer.Option(
-        False,
-        "--notify",
+    notify_level: str = typer.Option(
+        "warning",
+        "--notify-level",
         help=(
-            "Emit desktop notifications from the daemon. Off by default — pair "
-            "with a waybar module reading $XDG_RUNTIME_DIR/porcaria/status.json "
-            "for status-at-a-glance instead."
+            "Minimum level to surface via desktop notifications "
+            "(debug|info|warning|error|critical|none). Default: warning, so "
+            "task completions and errors pop up while in-progress chatter stays "
+            "silent. Use 'error' for failures-only, 'info' for full chatter, "
+            "or 'none' to silence everything. Pair with a waybar module "
+            "reading $XDG_RUNTIME_DIR/porcaria/status.json for "
+            "status-at-a-glance."
         ),
     ),
 ) -> None:
@@ -79,6 +86,15 @@ def start(
     Writes its PID to $XDG_RUNTIME_DIR/porcaria/porcaria.pid and exposes a Unix
     socket at $XDG_RUNTIME_DIR/porcaria/porcaria.sock. Logs go to daemon.log
     next to the pid file."""
+    level = notify_level.strip().lower()
+    if level not in _VALID_NOTIFY_LEVELS:
+        typer.secho(
+            f"invalid --notify-level {notify_level!r}; valid: {list(_VALID_NOTIFY_LEVELS)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
+
     paths.ensure_dirs()
     existing = _read_pid()
     if existing and _alive(existing):
@@ -87,10 +103,10 @@ def start(
 
     cmd = [sys.executable, "-m", "porcaria.daemon.server"]
     env = os.environ.copy()
-    if notify:
-        env["PORCARIA_NOTIFY"] = "1"
-    else:
-        env.pop("PORCARIA_NOTIFY", None)
+    env["PORCARIA_NOTIFY_LEVEL"] = level
+    # Previous release shipped a boolean PORCARIA_NOTIFY; strip any inherited
+    # value so it can't confuse older notify.py builds.
+    env.pop("PORCARIA_NOTIFY", None)
 
     if foreground:
         os.execvpe(cmd[0], cmd, env)

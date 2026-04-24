@@ -222,7 +222,7 @@ def _spawn(spec: ServerSpec) -> dict:
     fh.write(f"\n--- porcaria supervisor starting {spec.name} at {int(time.time())} ---\n".encode())
     t_start = time.monotonic()
     log.info("supervisor: spawning %s (health timeout %.0fs)", spec.name, spec.health_timeout_s)
-    notify.info("porcaria", f"starting {spec.name}…")
+    notify.info(f"Starting {spec.name}", "Waiting for health endpoint…")
     try:
         proc = subprocess.Popen(  # noqa: S603
             spec.argv,
@@ -234,7 +234,7 @@ def _spawn(spec: ServerSpec) -> dict:
     except FileNotFoundError as e:
         fh.close()
         log.warning("supervisor: %s executable not found: %s", spec.name, e)
-        notify.warn("porcaria", f"{spec.name} failed: executable not found")
+        notify.error(f"{spec.name} executable missing", "Install it and retry.")
         return {"status": "error", "error": f"executable not found: {e}"}
 
     _pid_file(spec.name).write_text(str(proc.pid))
@@ -249,10 +249,10 @@ def _spawn(spec: ServerSpec) -> dict:
         _pid_file(spec.name).unlink(missing_ok=True)
         tail = _tail(log_path, 40)
         log.warning("supervisor: %s %s after %.1fs", spec.name, reason, elapsed)
-        notify.warn("porcaria", f"{spec.name} failed to start ({reason})")
+        notify.error(f"{spec.name} failed to start", reason)
         return {"status": "error", "error": reason, "elapsed_s": round(elapsed, 1), "log_tail": tail}
     log.info("supervisor: %s ready in %.1fs", spec.name, elapsed)
-    notify.info("porcaria", f"{spec.name} ready ({elapsed:.0f}s)")
+    notify.success(f"{spec.name} ready", f"Booted in {elapsed:.0f}s.")
     return {"status": "started", "pid": proc.pid, "elapsed_s": round(elapsed, 1), **spec.extra_state}
 
 
@@ -300,9 +300,9 @@ def _stop_one(name: str) -> dict:
     ok = _kill(pid)
     _pid_file(name).unlink(missing_ok=True)
     if ok:
-        notify.info("porcaria", f"{name} stopped")
+        notify.info(f"{name} stopped", "")
     else:
-        notify.warn("porcaria", f"{name} kill failed (pid {pid})")
+        notify.error(f"{name} kill failed", f"pid {pid}")
     return {"status": "stopped" if ok else "kill_failed", "pid": pid}
 
 
@@ -343,7 +343,7 @@ def _start_kokoro(cfg: Config) -> dict:
         ensure_kokoro_assets(k)
     except KokoroAssetError as e:
         log.warning("supervisor: kokoro assets unavailable: %s", e)
-        notify.warn("porcaria", f"kokoro failed: {e}")
+        notify.error("Kokoro assets unavailable", str(e))
         return {"status": "error", "error": str(e)}
     return _spawn(_kokoro_spec(cfg))
 

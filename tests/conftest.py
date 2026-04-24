@@ -21,5 +21,5 @@ from porcaria import notify
 
 @pytest.fixture(autouse=True)
 def _silence_notify(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("send", "info", "warn", "error"):
+    for name in ("send", "debug", "info", "success", "warn", "error", "critical"):
         monkeypatch.setattr(notify, name, lambda *args, **kwargs: True)

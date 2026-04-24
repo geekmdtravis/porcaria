@@ -92,7 +92,7 @@ def _ensure_one(asset: _Asset, *, auto_download: bool, force: bool) -> None:
         if _hash_ok(asset.dest, asset.sha256):
             return
         log.warning("kokoro %s at %s failed hash check; re-fetching", asset.label, asset.dest)
-        notify.info("porcaria", f"kokoro {asset.label}: hash pin drifted, re-fetching…")
+        notify.info(f"Kokoro {asset.label} hash drifted", "Re-fetching…")
     if not auto_download:
         raise KokoroAssetError(
             f"kokoro {asset.label} missing or invalid at {asset.dest} and auto_download is disabled"
@@ -125,7 +125,7 @@ def _download(asset: _Asset) -> None:
 
     mb = asset.min_bytes / (1024 * 1024)
     log.info("kokoro: downloading %s from %s", asset.label, asset.url)
-    notify.info("porcaria", f"downloading kokoro {asset.label} (~{mb:.0f} MB+)…")
+    notify.info(f"Downloading Kokoro {asset.label}", f"~{mb:.0f} MB+…")
 
     h = hashlib.sha256()
     written = 0
@@ -152,12 +152,12 @@ def _download(asset: _Asset) -> None:
                         next_log += 0.2
     except (httpx.HTTPError, OSError) as e:
         partial.unlink(missing_ok=True)
-        notify.warn("porcaria", f"kokoro {asset.label} download failed")
+        notify.error(f"Kokoro {asset.label} download failed", "")
         raise KokoroAssetError(f"download of {asset.label} failed: {e}") from e
 
     if written < asset.min_bytes:
         partial.unlink(missing_ok=True)
-        notify.warn("porcaria", f"kokoro {asset.label} download truncated")
+        notify.error(f"Kokoro {asset.label} download truncated", "")
         raise KokoroAssetError(
             f"{asset.label} download truncated: got {written} bytes, need >= {asset.min_bytes}"
         )
@@ -166,11 +166,11 @@ def _download(asset: _Asset) -> None:
         actual = h.hexdigest()
         if actual.lower() != asset.sha256.lower():
             partial.unlink(missing_ok=True)
-            notify.warn("porcaria", f"kokoro {asset.label} hash mismatch")
+            notify.error(f"Kokoro {asset.label} hash mismatch", "")
             raise KokoroAssetError(
                 f"{asset.label} sha256 mismatch: expected {asset.sha256}, got {actual}"
             )
 
     os.replace(partial, asset.dest)
     log.info("kokoro %s ready at %s (%d bytes)", asset.label, asset.dest, written)
-    notify.info("porcaria", f"kokoro {asset.label} ready")
+    notify.success(f"Kokoro {asset.label} ready", "")

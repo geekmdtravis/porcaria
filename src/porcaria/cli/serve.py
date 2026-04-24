@@ -20,9 +20,9 @@ def _announce(msg: str) -> None:
 def _fail_no_daemon() -> None:
     """Exit with a daemon-not-running error, also sent as a desktop
     notification so Hyprland keybinds don't fail silently."""
-    msg = "daemon not running; run `porcaria daemon start` first"
-    typer.secho(msg, fg=typer.colors.YELLOW, err=True)
-    notify.error("porcaria", msg)
+    msg = "Run `porcaria daemon start` first."
+    typer.secho(f"daemon not running; {msg.lower()}", fg=typer.colors.YELLOW, err=True)
+    notify.error("Porcaria daemon offline", msg)
     raise typer.Exit(2)
 
 app = typer.Typer(
