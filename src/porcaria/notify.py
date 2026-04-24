@@ -1,6 +1,7 @@
 """Desktop notifications via notify-send. Fire-and-forget; never blocks the caller."""
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import Literal
 
@@ -18,11 +19,17 @@ def send(
 ) -> bool:
     """Send a desktop notification without blocking.
 
-    Returns True if the spawn succeeded, False if notify-send is missing or the
-    spawn itself failed. We do NOT wait for the subprocess — notify-send can
-    take 20–40 ms synchronously via D-Bus, and three of those per dictation
-    toggle noticeably delays the hot path.
+    Returns True if the spawn succeeded, False if notify-send is missing, the
+    spawn itself failed, or desktop notifications are disabled. The daemon is
+    silent by default; `porcaria daemon start --notify` sets PORCARIA_NOTIFY=1
+    in its own environment to re-enable them.
+
+    We do NOT wait for the subprocess — notify-send can take 20–40 ms
+    synchronously via D-Bus, and three of those per dictation toggle noticeably
+    delays the hot path.
     """
+    if os.environ.get("PORCARIA_NOTIFY") != "1":
+        return False
     if not which("notify-send"):
         return False
     argv = ["notify-send", "-u", urgency]

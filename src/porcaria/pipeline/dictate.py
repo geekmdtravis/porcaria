@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from porcaria import notify
+from porcaria import live_state, notify
 from porcaria.audio import player
 from porcaria.capture import recorder
 from porcaria.capture.recorder import RecorderUnavailable
@@ -88,6 +88,7 @@ def start_recording(cfg: Config) -> dict:
         notify.error("Dictation", f"Could not start recording: {e}")
         raise
     _record_start_file().write_text(str(time.time_ns()))
+    live_state.set_recording(True)
     notify.send(
         "Dictation",
         "Recording… toggle the key again to stop.",
@@ -140,13 +141,17 @@ def stop_and_process(
 
     t_stop_start = time.monotonic()
     start_ns = _read_start_ns()
-    wav = recorder.stop()
+    try:
+        wav = recorder.stop()
+    finally:
+        live_state.set_recording(False)
     t_after_stop = _stage("recorder.stop", t_stop_start)
     notify.info("Dictation", f"Transcribing ({len(wav)//1024} KB)…")
     asr = get_asr(cfg, prof.asr)
     t_before_asr = time.monotonic()
     try:
-        transcript = asr.transcribe(wav)
+        with live_state.phase("transcribing"):
+            transcript = asr.transcribe(wav)
     except httpx.ConnectError as e:
         # Most common cause of "I recorded but nothing pasted": the ASR server isn't up.
         msg = (
@@ -169,7 +174,8 @@ def stop_and_process(
         # --clean: LLM cleanup for text that reaches sinks. Skipped for the task
         # route because the task pipeline has its own interpretation LLM call.
         try:
-            llm_output = clean_transcription(get_llm(cfg, prof.llm), transcript)
+            with live_state.phase("cleaning"):
+                llm_output = clean_transcription(get_llm(cfg, prof.llm), transcript)
         except Exception as e:
             log.warning("cleanup failed; using raw transcript: %s", e)
             notify.warn("Dictation", "AI cleanup failed, using raw transcription")
@@ -192,7 +198,8 @@ def stop_and_process(
         elif name == "note":
             r = QuickNoteSink(cfg.sinks.quick_note).handle(transcript, cleaned_arg)
         elif name == "speaker":
-            r = SpeakerSink(cfg, prof.tts).handle(transcript, cleaned_arg)
+            with live_state.phase("speaking"):
+                r = SpeakerSink(cfg, prof.tts).handle(transcript, cleaned_arg)
         else:  # should be unreachable — _parse_sinks already validated
             raise ValueError(f"unhandled sink {name!r}")
         if not r.ok:
@@ -224,31 +231,32 @@ def _handle_fazerei(
     tts_name: str,
     ctx: DictationContext,
 ) -> SinkResult:
-    sink = FazereiSink(cfg.sinks.fazerei)
-    system = sink.system_prompt(ctx) or ""
-    llm = get_llm(cfg, prof_llm)
-    try:
-        llm_output = llm.chat(system, transcript, temperature=0.0)
-    except Exception as e:
-        notify.warn("Fazerei Buddy", f"LLM call failed: {e}")
-        return SinkResult(ok=False, message=f"LLM call failed: {e}")
-
-    result = sink.handle(transcript, llm_output)
-
-    # Speak query results if any.
-    if result.artifact and any(v in result.message for v in ("queried",)):
+    with live_state.phase("task"):
+        sink = FazereiSink(cfg.sinks.fazerei)
+        system = sink.system_prompt(ctx) or ""
+        llm = get_llm(cfg, prof_llm)
         try:
-            speak_text = summarize_for_speech(llm, result.artifact, original_question=transcript)
-            _speak(cfg, tts_name, speak_text)
-            notify.info("Fazerei Buddy", speak_text[:400])
+            llm_output = llm.chat(system, transcript, temperature=0.0)
         except Exception as e:
-            log.warning("summarize/speak failed: %s", e)
+            notify.warn("Fazerei Buddy", f"LLM call failed: {e}")
+            return SinkResult(ok=False, message=f"LLM call failed: {e}")
 
-    if result.ok:
-        notify.info("Fazerei Buddy", result.message)
-    else:
-        notify.warn("Fazerei Buddy", result.message)
-    return result
+        result = sink.handle(transcript, llm_output)
+
+        # Speak query results if any.
+        if result.artifact and any(v in result.message for v in ("queried",)):
+            try:
+                speak_text = summarize_for_speech(llm, result.artifact, original_question=transcript)
+                _speak(cfg, tts_name, speak_text)
+                notify.info("Fazerei Buddy", speak_text[:400])
+            except Exception as e:
+                log.warning("summarize/speak failed: %s", e)
+
+        if result.ok:
+            notify.info("Fazerei Buddy", result.message)
+        else:
+            notify.warn("Fazerei Buddy", result.message)
+        return result
 
 
 def _speak(cfg: Config, tts_name: str, text: str) -> None:
@@ -258,14 +266,15 @@ def _speak(cfg: Config, tts_name: str, text: str) -> None:
         tts = get_tts(cfg, tts_name)
     except Exception:
         return
-    try:
-        wav = tts.synth(text)
-    except Exception as e:
-        log.warning("tts synth failed: %s", e)
-        return
-    if not player.any_player_available():
-        return
-    player.play_bytes(wav)
+    with live_state.phase("speaking"):
+        try:
+            wav = tts.synth(text)
+        except Exception as e:
+            log.warning("tts synth failed: %s", e)
+            return
+        if not player.any_player_available():
+            return
+        player.play_bytes(wav)
 
 
 def _read_start_ns() -> int | None:

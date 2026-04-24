@@ -64,6 +64,15 @@ def start(
             "instead of double-forking into the background. Useful for debugging."
         ),
     ),
+    notify: bool = typer.Option(
+        False,
+        "--notify",
+        help=(
+            "Emit desktop notifications from the daemon. Off by default — pair "
+            "with a waybar module reading $XDG_RUNTIME_DIR/porcaria/status.json "
+            "for status-at-a-glance instead."
+        ),
+    ),
 ) -> None:
     """Start the porcaria daemon, double-forked into the background by default.
 
@@ -77,12 +86,19 @@ def start(
         raise typer.Exit(0)
 
     cmd = [sys.executable, "-m", "porcaria.daemon.server"]
+    env = os.environ.copy()
+    if notify:
+        env["PORCARIA_NOTIFY"] = "1"
+    else:
+        env.pop("PORCARIA_NOTIFY", None)
+
     if foreground:
-        os.execvp(cmd[0], cmd)
+        os.execvpe(cmd[0], cmd, env)
 
     log_path = paths.runtime_dir() / "daemon.log"
     proc = subprocess.Popen(
         cmd,
+        env=env,
         stdout=open(log_path, "ab"),
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,

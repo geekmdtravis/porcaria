@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from porcaria import paths
+from porcaria import live_state, paths
 from porcaria.config import load_config
 from porcaria.config.schema import Config
 from porcaria.daemon import supervisor
@@ -39,8 +39,10 @@ async def h_ping(st: State, _params: dict) -> dict:
     return {"pong": True, "pid": os.getpid()}
 
 
-async def h_status(st: State, _params: dict) -> dict:
-    health = await asyncio.to_thread(supervisor.health_snapshot, st.cfg)
+def _status_dict(st: State) -> dict:
+    """Build the full status dict, including server health. Sync — callable from
+    worker threads (e.g. the live_state refresher) without event-loop churn."""
+    health = supervisor.health_snapshot(st.cfg)
     prof = st.cfg.profile()
     return {
         "active_profile": st.cfg.active_profile,
@@ -48,6 +50,23 @@ async def h_status(st: State, _params: dict) -> dict:
         "servers": health,
         "pid": os.getpid(),
     }
+
+
+async def h_status(st: State, _params: dict) -> dict:
+    base = await asyncio.to_thread(_status_dict, st)
+    base.update(live_state.snapshot_live())
+    return base
+
+
+@contextlib.asynccontextmanager
+async def _aphase(name: str):
+    """Async wrapper around the sync live_state.phase context manager."""
+    cm = live_state.phase(name)
+    cm.__enter__()
+    try:
+        yield
+    finally:
+        cm.__exit__(None, None, None)
 
 
 async def h_providers_list(st: State, _params: dict) -> dict:
@@ -125,7 +144,8 @@ async def h_transcribe(st: State, params: dict) -> dict:
     wav = base64.b64decode(wav_b64)
     prof = st.cfg.profile()
     provider = get_asr(st.cfg, prof.asr)
-    text = await asyncio.to_thread(provider.transcribe, wav)
+    async with _aphase("transcribing"):
+        text = await asyncio.to_thread(provider.transcribe, wav)
     return {"text": text, "provider": prof.asr}
 
 
@@ -141,7 +161,8 @@ async def h_speak(st: State, params: dict) -> dict:
     speed = float(params.get("speed") or 1.0)
     prof = st.cfg.profile()
     provider = get_tts(st.cfg, prof.tts)
-    wav = await asyncio.to_thread(provider.synth, text, voice=voice, speed=speed)
+    async with _aphase("speaking"):
+        wav = await asyncio.to_thread(provider.synth, text, voice=voice, speed=speed)
     return {"wav_b64": base64.b64encode(wav).decode(), "provider": prof.tts}
 
 
@@ -155,7 +176,8 @@ async def h_clean(st: State, params: dict) -> dict:
     prof = st.cfg.profile()
     provider = get_llm(st.cfg, prof.llm)
     system = _CLEAN_PROMPTS.get(style, _CLEAN_PROMPTS["dictation"])
-    cleaned = await asyncio.to_thread(provider.chat, system, text, temperature=0.0)
+    async with _aphase("cleaning"):
+        cleaned = await asyncio.to_thread(provider.chat, system, text, temperature=0.0)
     return {"text": cleaned, "provider": prof.llm, "style": style}
 
 
@@ -199,7 +221,8 @@ async def h_task(st: State, params: dict) -> dict:
             "query_output": result.artifact,
         }
 
-    return await asyncio.to_thread(_run)
+    async with _aphase("task"):
+        return await asyncio.to_thread(_run)
 
 
 _CLEAN_PROMPTS = {
@@ -387,6 +410,8 @@ async def _main() -> int:
     if cfg.daemon.http_enabled:
         http_server = await _run_http(st, cfg.daemon.http_bind)
 
+    live_state.init(build_status=lambda: _status_dict(st))
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, st.shutdown_event.set)
@@ -395,6 +420,7 @@ async def _main() -> int:
     try:
         await st.shutdown_event.wait()
     finally:
+        live_state.teardown()
         uds.close()
         await uds.wait_closed()
         if http_server is not None:
