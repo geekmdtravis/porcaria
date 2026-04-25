@@ -2,10 +2,16 @@
 
 Hard rules (replace the bash `fmt_process_fazerei_cmds` + eval):
   - Each line must start with the configured fazerei binary name.
-  - Mutation subcommands are whitelisted: add, done, undone, edit.
-  - Query subcommands are whitelisted: list, show.
+  - Mutation subcommands are whitelisted: add, done, undone, edit, snooze, rm.
+  - Query subcommands are whitelisted: list, show, today, next, stats.
   - Lines are parsed with shlex.split (quote-aware) and executed via
     subprocess.run. NO eval, NO shell=True.
+
+Intentionally NOT whitelisted (the LLM should never reach for these):
+  prune, undo, export, import, install-completion. They're either bulk
+  irreversible deletes (prune), undo-the-undo footguns (undo), file-handling
+  paths the voice loop can't supply (import/export), or one-shot setup
+  (install-completion).
 """
 from __future__ import annotations
 
@@ -16,8 +22,8 @@ from dataclasses import dataclass, field
 from porcaria.config.schema import FazereiCfg
 from porcaria.shellout import run
 
-MUTATION_VERBS = {"add", "done", "undone", "edit"}
-QUERY_VERBS = {"list", "show"}
+MUTATION_VERBS = {"add", "done", "undone", "edit", "snooze", "rm"}
+QUERY_VERBS = {"list", "show", "today", "next", "stats"}
 
 # Prefix/suffix strippers. Applied repeatedly until the line stops changing so
 # nested wrappers like "- `fazerei ...`" fully unwrap in one call.
@@ -67,7 +73,11 @@ class RunReport:
             bits.append("reverted")
         if "edit" in verbs:
             bits.append("edited")
-        if "list" in verbs or "show" in verbs:
+        if "snooze" in verbs:
+            bits.append("snoozed")
+        if "rm" in verbs:
+            bits.append("deleted")
+        if verbs & {"list", "show", "today", "next", "stats"}:
             bits.append("queried")
         return " ".join(bits)
 

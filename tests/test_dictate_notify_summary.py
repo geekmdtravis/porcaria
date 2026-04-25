@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from porcaria import live_state, notify
@@ -119,14 +117,19 @@ def test_summary_cleaned_prefix(monkeypatch):
 def test_summary_task_route_with_sink(monkeypatch):
     calls = _install_spy(monkeypatch)
 
-    # Stub out fazerei's handler so the task leg reports success without running a real command.
+    # Stub out the LLM-backed task helper so the task leg reports success
+    # without running a real LLM or fazerei binary.
     class FakeFazereiSink:
         def __init__(self, *a, **kw): pass
         def system_prompt(self, ctx): return ""
         def handle(self, transcript, llm_output):
             return SinkResult(ok=True, message="fazerei ran")
 
+    def fake_run_with_repair(_cfg, _llm, _system, _transcript):
+        return SinkResult(ok=True, message="1 added"), "fazerei add 'x'"
+
     monkeypatch.setattr(dictate_pipeline, "FazereiSink", FakeFazereiSink)
+    monkeypatch.setattr(dictate_pipeline, "run_with_repair", fake_run_with_repair)
 
     _run_stop(monkeypatch, clean=False, route="task", sinks="clipboard")
     title, body = calls[-1]

@@ -199,7 +199,7 @@ async def h_task(st: State, params: dict) -> dict:
 
     from porcaria.providers import get_llm
     from porcaria.sinks.base import DictationContext
-    from porcaria.sinks.fazerei import FazereiSink
+    from porcaria.sinks.fazerei import FazereiSink, run_with_repair
 
     text = (params.get("text") or "").strip()
     if not text:
@@ -212,8 +212,7 @@ async def h_task(st: State, params: dict) -> dict:
 
     def _run() -> dict:
         llm = get_llm(st.cfg, prof.llm)
-        llm_output = llm.chat(system, text, temperature=0.0)
-        result = sink.handle(text, llm_output)
+        result, llm_output = run_with_repair(st.cfg.sinks.fazerei, llm, system, text)
         return {
             "ok": result.ok,
             "message": result.message,

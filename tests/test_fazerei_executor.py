@@ -47,7 +47,19 @@ def test_sanitize_trims_whitespace():
 
 
 def test_classify_accepts_whitelisted_verbs(cfg: FazereiCfg):
-    for verb in ("add", "done", "undone", "edit", "list", "show"):
+    for verb in (
+        "add",
+        "done",
+        "undone",
+        "edit",
+        "snooze",
+        "rm",
+        "list",
+        "show",
+        "today",
+        "next",
+        "stats",
+    ):
         argv = shlex.split(f"fazerei {verb} stuff")
         assert executor.classify(argv, cfg.command) == verb
 
@@ -58,7 +70,12 @@ def test_classify_rejects_non_fazerei_binaries(cfg: FazereiCfg):
 
 
 def test_classify_rejects_unknown_subcommands(cfg: FazereiCfg):
+    # Intentionally NOT whitelisted: prune (bulk delete), import/export (file
+    # paths the voice loop can't supply), undo (footgun), install-completion.
     assert executor.classify(shlex.split("fazerei export"), cfg.command) is None
+    assert executor.classify(shlex.split("fazerei import file.json"), cfg.command) is None
+    assert executor.classify(shlex.split("fazerei prune"), cfg.command) is None
+    assert executor.classify(shlex.split("fazerei undo"), cfg.command) is None
     assert executor.classify(shlex.split("fazerei nuke"), cfg.command) is None
 
 
@@ -107,4 +124,20 @@ def test_action_summary(cfg: FazereiCfg):
     summary = report.action_summary()
     assert "added" in summary
     assert "marked done" in summary
+    assert "queried" in summary
+
+
+def test_action_summary_includes_new_verbs(cfg: FazereiCfg):
+    report = executor.RunReport()
+    report.outcomes.extend([
+        executor.CmdOutcome("fazerei snooze 3 --by 1W", "snooze", True),
+        executor.CmdOutcome("fazerei rm 5", "rm", True),
+        executor.CmdOutcome("fazerei today", "today", True),
+        executor.CmdOutcome("fazerei next", "next", True),
+        executor.CmdOutcome("fazerei stats", "stats", True),
+    ])
+    summary = report.action_summary()
+    assert "snoozed" in summary
+    assert "deleted" in summary
+    # today / next / stats all roll up under the existing "queried" bucket.
     assert "queried" in summary

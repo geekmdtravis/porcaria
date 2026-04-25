@@ -19,7 +19,7 @@ from porcaria.pipeline.summarize import summarize_for_speech
 from porcaria.providers import get_asr, get_llm, get_tts
 from porcaria.sinks.base import DictationContext, SinkResult
 from porcaria.sinks.clipboard import ClipboardSink
-from porcaria.sinks.fazerei import FazereiSink
+from porcaria.sinks.fazerei import FazereiSink, run_with_repair
 from porcaria.sinks.quick_note import QuickNoteSink
 from porcaria.sinks.speaker import SpeakerSink
 
@@ -236,12 +236,10 @@ def _handle_fazerei(
         system = sink.system_prompt(ctx) or ""
         llm = get_llm(cfg, prof_llm)
         try:
-            llm_output = llm.chat(system, transcript, temperature=0.0)
+            result, llm_output = run_with_repair(cfg.sinks.fazerei, llm, system, transcript)
         except Exception as e:
             notify.error("Task LLM failed", str(e))
             return SinkResult(ok=False, message=f"LLM call failed: {e}")
-
-        result = sink.handle(transcript, llm_output)
 
         # Speak query results if any.
         if result.artifact and any(v in result.message for v in ("queried",)):
@@ -255,7 +253,12 @@ def _handle_fazerei(
         if result.ok:
             notify.success("Task complete", result.message)
         else:
-            notify.error("Task failed", result.message)
+            # Include the raw LLM output so the user can diagnose without grepping logs.
+            snippet = (llm_output or "").strip()
+            if len(snippet) > 300:
+                snippet = snippet[:299] + "…"
+            detail = result.message + (f"\n--- LLM said ---\n{snippet}" if snippet else "")
+            notify.error("Task failed", detail)
         return result
 
 
