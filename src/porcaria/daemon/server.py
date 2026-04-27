@@ -224,6 +224,36 @@ async def h_task(st: State, params: dict) -> dict:
         return await asyncio.to_thread(_run)
 
 
+async def h_secret(st: State, params: dict) -> dict:
+    """Run a free-form secret request through the pass secret sink."""
+    from datetime import datetime
+
+    from porcaria.providers import get_llm
+    from porcaria.sinks.base import DictationContext
+    from porcaria.sinks.secret import SecretSink, run_with_repair
+
+    text = (params.get("text") or "").strip()
+    if not text:
+        raise ValueError("text required")
+
+    prof = st.cfg.profile()
+    sink = SecretSink(st.cfg.sinks.secret)
+    ctx = DictationContext(now=datetime.now(), profile=prof.llm, extras={})
+    system = sink.system_prompt(ctx) or ""
+
+    def _run() -> dict:
+        llm = get_llm(st.cfg, prof.llm)
+        result, llm_output = run_with_repair(st.cfg.sinks.secret, llm, system, text)
+        return {
+            "ok": result.ok,
+            "message": result.message,
+            "llm_output": llm_output,
+        }
+
+    async with _aphase("secret"):
+        return await asyncio.to_thread(_run)
+
+
 _CLEAN_PROMPTS = {
     "dictation": (
         "You clean up voice-dictated text. Fix grammar, punctuation, capitalization, "
@@ -259,6 +289,7 @@ HANDLERS: dict[str, Handler] = {
     "clean": h_clean,
     "dictate.toggle": h_dictate_toggle,
     "task": h_task,
+    "secret": h_secret,
 }
 
 

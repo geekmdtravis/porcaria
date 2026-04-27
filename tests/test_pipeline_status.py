@@ -110,6 +110,125 @@ def test_asr_exception_leaves_state_idle(monkeypatch):
     assert snap["phase_stack"] == []
 
 
+def test_secret_route_rejects_sink_fanout(monkeypatch):
+    monkeypatch.setattr(dictate_pipeline.recorder, "is_recording", lambda: True)
+
+    with pytest.raises(ValueError, match="does not allow --sinks"):
+        dictate_pipeline.stop_and_process(
+            _cfg(), clean=False, route="secret", sinks="speaker"
+        )
+
+
+def test_secret_not_found_notifies_warning(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeSecretSink:
+        def __init__(self, *a, **kw):
+            pass
+
+        def system_prompt(self, ctx):
+            return "system"
+
+    class FakeLLM:
+        pass
+
+    monkeypatch.setattr(dictate_pipeline, "SecretSink", FakeSecretSink)
+    monkeypatch.setattr(dictate_pipeline, "get_llm", lambda cfg, name: FakeLLM())
+    monkeypatch.setattr(
+        dictate_pipeline,
+        "run_secret_with_repair",
+        lambda cfg, llm, system, transcript: (
+            SinkResult(
+                ok=False,
+                message="I couldn't find a matching password under porcaria-accessible.",
+                artifact="not_found",
+            ),
+            "PASS_NOT_FOUND",
+        ),
+    )
+    monkeypatch.setattr(
+        dictate_pipeline.notify,
+        "warn",
+        lambda title, body="": calls.append(("warn", title, body)) or True,
+    )
+    monkeypatch.setattr(
+        dictate_pipeline.notify,
+        "error",
+        lambda title, body="": calls.append(("error", title, body)) or True,
+    )
+
+    result = dictate_pipeline._handle_secret(
+        _cfg(),
+        "copy my google password",
+        prof_llm="llamacpp",
+        ctx=dictate_pipeline.DictationContext(
+            now=__import__("datetime").datetime.now(), profile="test", extras={}
+        ),
+    )
+
+    assert not result.ok
+    assert calls == [
+        (
+            "warn",
+            "Secret not found",
+            "I couldn't find a matching password under porcaria-accessible.",
+        )
+    ]
+
+
+def test_secret_skip_notifies_warning_without_protocol_token(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeSecretSink:
+        def __init__(self, *a, **kw):
+            pass
+
+        def system_prompt(self, ctx):
+            return "system"
+
+    class FakeLLM:
+        pass
+
+    monkeypatch.setattr(dictate_pipeline, "SecretSink", FakeSecretSink)
+    monkeypatch.setattr(dictate_pipeline, "get_llm", lambda cfg, name: FakeLLM())
+    monkeypatch.setattr(
+        dictate_pipeline,
+        "run_secret_with_repair",
+        lambda cfg, llm, system, transcript: (
+            SinkResult(
+                ok=False,
+                message="I didn't hear a password request.",
+                artifact="skipped",
+            ),
+            "PASS_SKIP",
+        ),
+    )
+    monkeypatch.setattr(
+        dictate_pipeline.notify,
+        "warn",
+        lambda title, body="": calls.append(("warn", title, body)) or True,
+    )
+    monkeypatch.setattr(
+        dictate_pipeline.notify,
+        "error",
+        lambda title, body="": calls.append(("error", title, body)) or True,
+    )
+
+    result = dictate_pipeline._handle_secret(
+        _cfg(),
+        "never mind",
+        prof_llm="llamacpp",
+        ctx=dictate_pipeline.DictationContext(
+            now=__import__("datetime").datetime.now(), profile="test", extras={}
+        ),
+    )
+
+    assert not result.ok
+    assert calls == [
+        ("warn", "No secret copied", "I didn't hear a password request.")
+    ]
+
+
 def test_recorder_stop_exception_still_clears_recording_flag(monkeypatch):
     live_state.set_recording(True)
 

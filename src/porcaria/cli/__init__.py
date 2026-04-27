@@ -9,6 +9,7 @@ from porcaria.cli import (
     daemon,
     dictate,
     download,
+    secret,
     serve,
     speak,
     status,
@@ -38,6 +39,7 @@ app.command("transcribe")(transcribe.main)
 app.command("speak")(speak.main)
 app.command("clean")(clean.main)
 app.command("task")(task.main)
+app.command("secret")(secret.main)
 app.command("status")(status.main)
 
 app.add_typer(

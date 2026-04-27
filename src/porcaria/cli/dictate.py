@@ -30,8 +30,9 @@ def main(
                 "is handed straight off to the sinks. "
                 "'task' means the LLM interprets the utterance as a fazerei command "
                 "and executes it (use this for voice-driven task management). "
-                "Routes and sinks are orthogonal: you can combine --route task with "
-                "any --sinks value to also get a clipboard/note/speaker copy."
+                "'secret' means the LLM selects an allowed pass entry and copies it "
+                "to the clipboard. Routes and sinks are orthogonal for default/task; "
+                "secret does not allow sink fanout."
             ),
         ),
     ] = "default",

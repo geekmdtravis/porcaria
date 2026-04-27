@@ -16,6 +16,7 @@ Supported methods (Phase 1):
   speak                  -> {"text": "...", "voice": "...", "speed": 1.0}  ->  {"wav_b64": "..."}
   clean                  -> {"text": "...", "style": "dictation"}  ->  {"text": "..."}
   task                   -> {"text": "..."} -> {"executed": [...]}
+  secret                 -> {"text": "..."} -> {"ok": true, "message": "..."}
   servers.start          -> {"which": "all|asr|tts|llm", "model": "small|large"}
   servers.stop           -> {"which": "all|asr|tts|llm"}
   shutdown               -> shuts down the daemon

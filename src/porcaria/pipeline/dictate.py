@@ -21,6 +21,7 @@ from porcaria.sinks.base import DictationContext, SinkResult
 from porcaria.sinks.clipboard import ClipboardSink
 from porcaria.sinks.fazerei import FazereiSink, run_with_repair
 from porcaria.sinks.quick_note import QuickNoteSink
+from porcaria.sinks.secret import SecretSink, run_with_repair as run_secret_with_repair
 from porcaria.sinks.speaker import SpeakerSink
 
 log = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ def _stage(label: str, t0: float) -> float:
 
 _START_TIME_KEY = "start_ns"
 
-_VALID_ROUTES = {"default", "task"}
+_VALID_ROUTES = {"default", "task", "secret"}
 _VALID_SINKS = {"clipboard", "note", "speaker"}
 
 
@@ -111,6 +112,7 @@ def stop_and_process(
     `route` is the processing pipeline:
       - "default" → no extra processing; hand off to sinks.
       - "task"    → LLM-interprets the transcript as a fazerei command and runs it.
+      - "secret"  → LLM-selects an allowed pass entry and copies it to clipboard.
 
     `sinks` is the comma-separated list of write destinations:
       - "clipboard", "note" (quick-note file), "speaker" (TTS read-back).
@@ -118,18 +120,23 @@ def stop_and_process(
       - None → fall back to the active profile's `sinks` list. An empty
         resolution triggers a console + desktop warning.
 
-    `route` and `sinks` are orthogonal: any route can coexist with any sinks. The
-    task route still does its own LLM interpretation on the raw transcript, but
-    sinks fire alongside.
+    `route` and `sinks` are orthogonal for default/task routes: any route can
+    coexist with any explicit sinks. Secret never allows sink fanout; its own
+    pass-to-clipboard copy is the only delivery path.
     """
     if not recorder.is_recording():
         return {"status": "not_recording"}
 
     prof = cfg.profile(profile_name)
-    if sinks is None:
+    if route == "secret" and sinks is not None and _parse_sinks(sinks):
+        raise ValueError("--route secret does not allow --sinks; it only copies via wl-copy")
+    secret_default_sinks_suppressed = sinks is None and route == "secret"
+    if secret_default_sinks_suppressed:
+        sinks = []
+    elif sinks is None:
         sinks = list(prof.sinks)
     sinks_resolved = _parse_sinks(sinks)
-    if not sinks_resolved:
+    if not sinks_resolved and not secret_default_sinks_suppressed:
         msg = (
             f"No sinks configured for profile {cfg.active_profile!r}; "
             "transcript will not be delivered anywhere."
@@ -170,9 +177,9 @@ def stop_and_process(
         return {"status": "empty_transcript"}
 
     llm_output: str | None = None
-    if clean and route != "task":
-        # --clean: LLM cleanup for text that reaches sinks. Skipped for the task
-        # route because the task pipeline has its own interpretation LLM call.
+    if clean and route not in {"task", "secret"}:
+        # --clean: LLM cleanup for text that reaches sinks. Skipped for task-like
+        # routes because they have their own interpretation LLM calls.
         try:
             with live_state.phase("cleaning"):
                 llm_output = clean_transcription(get_llm(cfg, prof.llm), transcript)
@@ -187,6 +194,9 @@ def stop_and_process(
     if route == "task":
         res = _handle_fazerei(cfg, transcript, prof_llm=prof.llm, tts_name=prof.tts, ctx=ctx)
         sink_results.append({"route": "task", **res.__dict__})
+    elif route == "secret":
+        res = _handle_secret(cfg, transcript, prof_llm=prof.llm, ctx=ctx)
+        sink_results.append({"route": "secret", **res.__dict__})
 
     # Sink fanout, orthogonal to route. Sinks receive the cleaned text when --clean is set.
     text_for_sinks = llm_output if llm_output is not None else transcript
@@ -262,6 +272,40 @@ def _handle_fazerei(
         return result
 
 
+def _handle_secret(
+    cfg: Config,
+    transcript: str,
+    *,
+    prof_llm: str,
+    ctx: DictationContext,
+) -> SinkResult:
+    with live_state.phase("secret"):
+        sink = SecretSink(cfg.sinks.secret)
+        system = sink.system_prompt(ctx) or ""
+        llm = get_llm(cfg, prof_llm)
+        try:
+            result, llm_output = run_secret_with_repair(
+                cfg.sinks.secret, llm, system, transcript
+            )
+        except Exception as e:
+            notify.error("Secret LLM failed", str(e))
+            return SinkResult(ok=False, message=f"LLM call failed: {e}")
+
+        if result.ok:
+            notify.success("Secret copied", result.message)
+        elif result.artifact == "not_found":
+            notify.warn("Secret not found", result.message)
+        elif result.artifact == "skipped":
+            notify.warn("No secret copied", result.message)
+        else:
+            snippet = (llm_output or "").strip()
+            if len(snippet) > 300:
+                snippet = snippet[:299] + "…"
+            detail = result.message + (f"\n--- LLM said ---\n{snippet}" if snippet else "")
+            notify.error("Secret failed", detail)
+        return result
+
+
 def _speak(cfg: Config, tts_name: str, text: str) -> None:
     if not text.strip():
         return
@@ -295,15 +339,15 @@ def _read_start_ns() -> int | None:
 def _successful_destinations(sink_results: list[dict]) -> list[str]:
     """Names of destinations (sinks + task route) that successfully delivered.
 
-    Each sink appends ``{"sink": name, "ok": bool, ...}``; the task route
-    appends ``{"route": "task", "ok": bool, ...}``. We list only those with
+    Each sink appends ``{"sink": name, "ok": bool, ...}``; routes append
+    ``{"route": name, "ok": bool, ...}``. We list only those with
     ``ok == True`` — failed destinations get their own error notifications."""
     dests: list[str] = []
     for r in sink_results:
         if not r.get("ok"):
             continue
-        if r.get("route") == "task":
-            dests.append("task")
+        if r.get("route") in {"task", "secret"}:
+            dests.append(r["route"])
         elif "sink" in r:
             dests.append(r["sink"])
     return dests

@@ -133,10 +133,17 @@ class FazereiCfg(_Strict):
     enabled: bool = True
 
 
+class SecretCfg(_Strict):
+    command: str = "pass"
+    prefix: str = "porcaria-accessible"
+    enabled: bool = True
+
+
 class SinksCfg(_Strict):
     clipboard: ClipboardCfg = ClipboardCfg()
     quick_note: QuickNoteCfg = QuickNoteCfg()
     fazerei: FazereiCfg = FazereiCfg()
+    secret: SecretCfg = SecretCfg()
 
 
 # ---------- daemon ----------

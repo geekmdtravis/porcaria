@@ -149,6 +149,14 @@ dir = "$XDG_DOCUMENTS_DIR/quick-notes"
 command = "fazerei"
 enabled = true
 
+[sinks.secret]
+# Password-store integration used by `--route secret`. The LLM may only select
+# entries under `prefix`; porcaria validates the selected entry against `pass ls`
+# before asking pass to copy it with `pass show -c`.
+command = "pass"
+prefix = "porcaria-accessible"
+enabled = true
+
 
 # ---------- daemon ----------
 
